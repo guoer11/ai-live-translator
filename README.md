@@ -1,4 +1,13 @@
-# AI 即時翻譯 APP · V0.1.1
+# AI 即時翻譯 APP · V0.1.6
+
+## V0.1.6 語音辨識升級（2026-09-10）
+
+- 語音辨識改為 `gpt-live-transcribe`，沿用現有 WebRTC Realtime session；文字翻譯模型不變。
+- `languages: ['zh-tw', 所選外語]` 提供雙語辨識範圍，保留自動方向，不新增操作模式。
+- 伺服器降噪改為 `far_field`，用於手機開放空間收音。電視配樂、多人重疊、距離與回音仍可能造成誤辨，並非聲源分離。
+- 保留 V0.1.5 的 VAD（threshold 0.5、prefix 700 ms、silence 1200 ms）、Safari 麥克風處理與 ASR 完成事件排序。未加入一般 Realtime session schema 未列出的 delay 欄位。
+- 測試為模擬 HTTP／WebRTC 回歸測試；仍需實機驗證新模型權限、端到端連線與辨識品質，不宣稱已完成 iPhone／電視收音實測。
+- 設定依據：[OpenAI Realtime API](https://developers.openai.com/api/reference/resources/realtime/subresources/client_secrets)、[即時轉錄](https://developers.openai.com/api/docs/guides/realtime-transcription)。下方舊版紀錄為歷史說明。
 
 ## V0.1.1 語言與原文對應修正（2026-09-10）
 

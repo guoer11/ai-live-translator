@@ -114,6 +114,11 @@ test('all language pairs use server-controlled text sessions; secrets never retu
       calls.push({ url, init }); if (calls.length === 1) return Response.json(true);
       const config = JSON.parse(init.body.get('session'));
       assert.deepEqual(config.output_modalities, ['text']);
+      assert.equal(config.audio.input.transcription.model, 'gpt-live-transcribe');
+      assert.deepEqual(config.audio.input.transcription.languages, ['zh-tw', language]);
+      assert.equal(Object.hasOwn(config.audio.input.transcription, 'language'), false);
+      assert.match(config.audio.input.transcription.prompt, /Traditional Chinese/);
+      assert.deepEqual(config.audio.input.noise_reduction, { type: 'far_field' });
       assert.equal(config.audio.input.turn_detection.create_response, false);
       assert.deepEqual(config.audio.input.turn_detection, { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 700, silence_duration_ms: 1200, create_response: false, interrupt_response: false });
       assert.equal(init.headers.Authorization, 'Bearer server-only-key');
