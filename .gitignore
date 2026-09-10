@@ -4,4 +4,5 @@
 supabase/.temp/
 .sites-runtime/
 node_modules/
+dist/vendor/supabase/
 *.zip

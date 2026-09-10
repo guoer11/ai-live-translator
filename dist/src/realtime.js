@@ -1,8 +1,8 @@
 import { prepareTranscript, cleanTranslation, translationInstructions } from './language.js';
 // The displayed ASR text is the sole translation input, never a second audio interpretation.
 export class RealtimeTranslator {
-  constructor({ endpoint, language, accessCode, onEvent, onState, onError }) {
-    Object.assign(this, { endpoint, language, accessCode, onEvent, onState, onError });
+  constructor({ endpoint, language, accessToken, onEvent, onState, onError }) {
+    Object.assign(this, { endpoint, language, accessToken, onEvent, onState, onError });
     this.closed = false; this.queue = []; this.active = null; this.responses = new Map();
     this.seen = new Set(); this.abort = new AbortController();
     this.turns = new Map();
@@ -45,7 +45,7 @@ export class RealtimeTranslator {
     if (this.closed) return;
     await this.pc.setLocalDescription(offer);
     const response = await fetch(this.endpoint, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Access-Code': this.accessCode },
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.accessToken}` },
       body: JSON.stringify({ sdp: offer.sdp, language: this.language }), signal: this.abort.signal,
     });
     if (!response.ok) {

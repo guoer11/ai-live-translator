@@ -13,12 +13,14 @@ export function sessionConfig(language, model) {
       turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 700, silence_duration_ms: 1200, create_response: false, interrupt_response: false } } },
   };
 }
-async function equalSecret(a, b) {
-  const encode = value => crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  const [x, y] = await Promise.all([encode(a), encode(b)]);
-  const left = new Uint8Array(x), right = new Uint8Array(y);
-  let difference = 0; for (let i = 0; i < left.length; i++) difference |= left[i] ^ right[i];
-  return difference === 0;
+// Called only with a user retrieved from Supabase Auth, never browser user_metadata.
+export function verifiedGoogleEmail(user) {
+  const email = user?.email?.toLowerCase();
+  if (!email || !user.email_confirmed_at || user.is_anonymous) return null;
+  const identity = user.identities?.find(i => i.provider === 'google'
+    && i.identity_data?.email?.toLowerCase() === email
+    && i.identity_data?.email_verified === true);
+  return identity ? email : null;
 }
 async function boundedText(request, maxBytes) {
   const reader = request.body?.getReader(); if (!reader) return '';
@@ -41,15 +43,29 @@ export function createHandler({ env, fetcher = fetch }) {
     const json = (status, error) => new Response(JSON.stringify({ error }), { status, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' } });
     if (!allowed.includes(origin)) return json(403, '這個網站尚未獲准使用翻譯服務。');
     headers['Access-Control-Allow-Origin'] = origin;
-    headers['Access-Control-Allow-Headers'] = 'content-type, x-access-code';
-    headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS';
+    headers['Access-Control-Allow-Headers'] = 'content-type, authorization, apikey';
+    headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
-    if (request.method !== 'POST') return json(405, '不支援這個請求方式。');
-    const apiKey = env('OPENAI_API_KEY'), code = env('TRANSLATOR_ACCESS_CODE');
+    if (!['GET', 'POST'].includes(request.method)) return json(405, '不支援這個請求方式。');
+    const apiKey = env('OPENAI_API_KEY');
     const supabaseUrl = env('SUPABASE_URL'), serviceKey = env('SUPABASE_SERVICE_ROLE_KEY');
-    if (!apiKey || !code || code.length < 16 || !supabaseUrl || !serviceKey) return json(503, '翻譯服務尚未設定完成，請聯絡管理者。');
-    const supplied = request.headers.get('x-access-code') || '';
-    if (supplied.length > 200 || !(await equalSecret(supplied, code))) return json(401, '測試使用碼不正確，請在設定重新輸入。');
+    const authorization = request.headers.get('authorization') || '';
+    if (!/^Bearer \S+$/i.test(authorization) || authorization.length > 8192) return json(401, '請先使用 Google 登入。');
+    if (!apiKey || !supabaseUrl || !serviceKey) return json(503, '翻譯服務尚未設定完成，請聯絡管理者。');
+    try {
+      const auth = await fetcher(`${supabaseUrl}/auth/v1/user`, { headers: { apikey: serviceKey, Authorization: authorization }, signal: AbortSignal.timeout(8000) });
+      if (!auth.ok) return json(auth.status >= 500 ? 503 : 401, '登入驗證失敗，請重新登入或稍後再試。');
+      const user = await auth.json();
+      const email = verifiedGoogleEmail(user);
+      if (!email) return json(403, '請使用已驗證的家庭 Google 帳號登入。');
+      const lookup = new URL(`${supabaseUrl}/rest/v1/translator_allowed_users`);
+      lookup.search = new URLSearchParams({ select: 'email', email: `eq.${email}`, enabled: 'eq.true', limit: '1' }).toString();
+      const result = await fetcher(lookup.href, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` }, signal: AbortSignal.timeout(8000) });
+      if (!result.ok) return json(503, '目前無法確認使用權限，請稍後再試。');
+      const rows = await result.json();
+      if (!Array.isArray(rows) || rows.length !== 1 || rows[0].email !== email) return json(403, '這個 Google 帳號未獲授權，僅限指定家人使用。');
+      if (request.method === 'GET') return new Response(JSON.stringify({ email, userId: user.id }), { headers: { ...headers, 'Content-Type': 'application/json' } });
+    } catch { return json(503, '目前無法確認登入狀態，請稍後再試。'); }
     if (!request.headers.get('content-type')?.startsWith('application/json')) return json(415, '請求格式不正確。');
     let data;
     try { data = JSON.parse(await boundedText(request, 65536)); }

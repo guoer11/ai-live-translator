@@ -5,8 +5,13 @@ import { RealtimeTranslator } from '../dist/src/realtime.js';
 import { createHandler } from '../supabase/functions/realtime-session/handler.js';
 import { prepareTranscript, cleanTranslation } from '../dist/src/language.js';
 const envValues = { ALLOWED_ORIGINS: 'https://guoer11.github.io', OPENAI_API_KEY: 'server-only-key', TRANSLATOR_ACCESS_CODE: 'a-long-test-code-12345', SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'private-role-key' };
-const request = (body = { sdp: 'v=0\r\n', language: 'en' }, code = envValues.TRANSLATOR_ACCESS_CODE, origin = envValues.ALLOWED_ORIGINS) => new Request('https://example.supabase.co/functions/v1/realtime-session', { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-access-code': code }, body: JSON.stringify(body) });
-const handler = fetcher => createHandler({ env: key => envValues[key], fetcher });
+const user = { id: 'family-user', email: 'family@example.com', email_confirmed_at: '2026-09-10', identities: [{ provider: 'google', identity_data: { email: 'family@example.com', email_verified: true } }] };
+const request = (body = { sdp: 'v=0\r\n', language: 'en' }, token = 'valid-token', origin = envValues.ALLOWED_ORIGINS) => new Request('https://example.supabase.co/functions/v1/realtime-session', { method: 'POST', headers: { origin, 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+const handler = fetcher => createHandler({ env: key => envValues[key], fetcher: async (url, init) => {
+  if (url.endsWith('/auth/v1/user')) return init.headers.Authorization === 'Bearer valid-token' ? Response.json(user) : new Response('', { status: 401 });
+  if (url.includes('/rest/v1/translator_allowed_users')) return Response.json([{ email: user.email }]);
+  return fetcher(url, init);
+} });
 
 test('history expires exactly at TTL; corrupted/blocked storage works', () => {
   let now = 1000000; const h = new History({ getItem: () => 'bad', setItem: () => { throw Error(); } }, 5, () => now);
@@ -90,7 +95,7 @@ test('initially muted microphone is monitored and manual stop cancels timeout', 
   c.stream = { getTracks: () => [track] }; c.watchAudioTrack(track);
   assert.ok(c.muteTimer); c.stop(); t.mock.timers.tick(4000);
 });
-test('wrong origin/access code never reaches quota or OpenAI', async () => {
+test('wrong origin/token never reaches quota or OpenAI', async () => {
   let calls = 0; const h = handler(async () => { calls++; throw Error(); });
   assert.equal((await h(request(undefined, undefined, 'https://evil.example'))).status, 403);
   assert.equal((await h(request(undefined, 'wrong'))).status, 401); assert.equal(calls, 0);

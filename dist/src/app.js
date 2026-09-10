@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { History } from './history.js';
 import { RealtimeTranslator } from './realtime.js';
+import { auth, authorize, signIn } from './auth.js';
 const $ = id => document.getElementById(id);
 let storage; try { storage = sessionStorage; } catch { /* Private browser restrictions. */ }
 let prefs = {}; try { prefs = JSON.parse(localStorage.getItem('translator.preferences') || '{}'); } catch {}
@@ -10,7 +11,40 @@ $('language').value = ['en', 'ja', 'ko'].includes(prefs.language) ? prefs.langua
 $('retention').value = String(history.minutes);
 $('font-size').value = prefs.large ? 'large' : 'normal';
 document.body.classList.toggle('large', !!prefs.large);
-let accessCode = '', client = null, started = 0, wakeLock = null, demoMode = false;
+let client = null, started = 0, wakeLock = null, demoMode = false;
+let account = null, authRevision = 0, starting = false;
+function lock(message = '請使用家庭 Google 帳號登入。') {
+  account = null; stop(); history.clear(); render();
+  $('settings').close(); document.querySelector('.app').hidden = true;
+  $('auth-gate').hidden = false; $('auth-message').textContent = message;
+}
+async function checkLogin() {
+  const revision = ++authRevision;
+  try {
+    const verified = await authorize();
+    if (revision !== authRevision) return;
+    if (account?.userId !== verified.userId) { stop(); history.clear(); render(); }
+    account = verified; $('account-email').textContent = verified.email;
+    $('auth-gate').hidden = true; document.querySelector('.app').hidden = false;
+  } catch (error) { if (revision === authRevision) lock(error.message); }
+}
+$('google-login').onclick = async () => {
+  $('google-login').disabled = true;
+  try { await signIn(); } catch (error) { $('auth-message').textContent = error.message; }
+  finally { $('google-login').disabled = false; }
+};
+async function signOut() {
+  ++authRevision; lock();
+  const { error } = await auth.signOut({ scope: 'local' });
+  if (error) $('auth-message').textContent = '登出未完成，請連線後再按一次登出。';
+}
+$('sign-out').onclick = signOut;
+$('gate-sign-out').onclick = signOut;
+auth.onAuthStateChange((event) => {
+  // Supabase callbacks must not await another Auth method under its internal lock.
+  if (event === 'SIGNED_OUT') { ++authRevision; lock(); }
+  else setTimeout(checkLogin, 0);
+});
 let updateReady = false, updateReloading = false;
 function notice(text = '') { $('notice').textContent = text; $('notice').hidden = !text; }
 function reloadForUpdate() {
@@ -83,12 +117,19 @@ function stop(message = '') {
 }
 $('start').onclick = async () => {
   if (client) { stop(); return; }
+  if (starting) return;
   if (!navigator.onLine) { notice('目前沒有網路，連線後才能開始翻譯。'); return; }
   if (!config.sessionEndpoint) { notice('即時翻譯尚未啟用：管理者完成後端連線設定後即可使用。你可以先查看字幕示範。'); return; }
-  if (!accessCode) { notice('請先在設定輸入測試使用碼。'); $('settings').showModal(); return; }
+  starting = true;
+  let verified;
+  const revision = authRevision;
+  try { verified = await authorize(); }
+  catch (error) { lock(error.message); return; }
+  finally { starting = false; }
+  if (!account || revision !== authRevision || verified.userId !== account.userId || document.hidden) return;
   if (demoMode) { history.items = history.items.filter(x => !x.demo); demoMode = false; }
   notice(); controls(true); started = Date.now(); $('elapsed').textContent = '00:00';
-  const session = new RealtimeTranslator({ endpoint: config.sessionEndpoint, language: $('language').value, accessCode,
+  const session = new RealtimeTranslator({ endpoint: config.sessionEndpoint, language: $('language').value, accessToken: verified.token,
     onState: value => { if (client === session) state(value); },
     onEvent: e => { if (client === session) onEvent(e); },
     onError: message => { if (client === session) stop(message); },
@@ -108,7 +149,7 @@ $('start').onclick = async () => {
 $('settings-button').onclick = () => $('settings').showModal();
 $('close-settings').onclick = () => $('settings').close();
 $('settings-form').onsubmit = e => {
-  e.preventDefault(); accessCode = $('access-code').value.trim();
+  e.preventDefault();
   history.minutes = Number($('retention').value); document.body.classList.toggle('large', $('font-size').value === 'large');
   savePreferences(); render(); $('settings').close();
 };

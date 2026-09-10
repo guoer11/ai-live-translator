@@ -1,4 +1,11 @@
-# AI 即時翻譯 APP · V0.1.6
+# AI 即時翻譯 APP · V0.2.0
+
+## V0.2.0 家庭 Google 登入
+
+- 使用 Google OAuth／Supabase Auth，未登入不能使用。後端驗證 Google 身分與非公開家庭名單，停用舊使用碼。
+- 登出停止麥克風並清除對話；翻譯語言、收音與辨識模型維持原設定。
+- **Google provider 尚須管理者設定；部署程式不等於 OAuth 已完成。** 請依 [Google 登入設定](GOOGLE_LOGIN_SETUP.md) 完成。
+- 建置先執行 `npm ci --ignore-scripts` 再 `npm run build`。以下舊版紀錄為歷史說明。
 
 ## V0.1.6 語音辨識升級（2026-09-10）
 
