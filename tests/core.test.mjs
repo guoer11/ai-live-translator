@@ -70,6 +70,26 @@ test('stop closes microphone, connection, and suppresses late events', () => {
   c.handle({ type: 'input_audio_buffer.committed', item_id: 'late' });
   assert.equal(stopped, 1); assert.equal(closed, 1); assert.equal(events, 0); assert.equal(c.abort.signal.aborted, true);
 });
+test('temporary microphone mute recovers; sustained mute stops capture and clears handlers', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const errors = []; let stopped = 0;
+  const track = { muted: false, stop: () => stopped++ };
+  const c = new RealtimeTranslator({ onEvent: () => {}, onState: () => {}, onError: e => errors.push(e) });
+  c.stream = { getTracks: () => [track] }; c.watchAudioTrack(track);
+  track.muted = true; track.onmute(); t.mock.timers.tick(2999);
+  track.muted = false; track.onunmute(); t.mock.timers.tick(3000);
+  assert.equal(c.closed, false); assert.equal(errors.length, 0);
+  track.muted = true; track.onmute(); t.mock.timers.tick(3000);
+  assert.equal(c.closed, true); assert.equal(errors.length, 1); assert.equal(stopped, 1);
+  assert.equal(track.onmute, null); assert.equal(track.onunmute, null); assert.equal(track.onended, null);
+});
+test('initially muted microphone is monitored and manual stop cancels timeout', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const track = { muted: true, stop() {} };
+  const c = new RealtimeTranslator({ onEvent: () => {}, onState: () => {}, onError: assert.fail });
+  c.stream = { getTracks: () => [track] }; c.watchAudioTrack(track);
+  assert.ok(c.muteTimer); c.stop(); t.mock.timers.tick(4000);
+});
 test('wrong origin/access code never reaches quota or OpenAI', async () => {
   let calls = 0; const h = handler(async () => { calls++; throw Error(); });
   assert.equal((await h(request(undefined, undefined, 'https://evil.example'))).status, 403);
@@ -95,6 +115,7 @@ test('all language pairs use server-controlled text sessions; secrets never retu
       const config = JSON.parse(init.body.get('session'));
       assert.deepEqual(config.output_modalities, ['text']);
       assert.equal(config.audio.input.turn_detection.create_response, false);
+      assert.deepEqual(config.audio.input.turn_detection, { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 700, silence_duration_ms: 1200, create_response: false, interrupt_response: false });
       assert.equal(init.headers.Authorization, 'Bearer server-only-key');
       return new Response('v=0\r\nanswer');
     });

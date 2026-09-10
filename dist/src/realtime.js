@@ -14,10 +14,14 @@ export class RealtimeTranslator {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: { ideal: 1 }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
     if (this.closed) { stream.getTracks().forEach(t => t.stop()); return; }
     this.stream = stream;
+    const audioTracks = stream.getAudioTracks();
+    if (!audioTracks.length || audioTracks.some(track => track.readyState === 'ended' || !track.enabled)) {
+      throw new Error('麥克風沒有可用的音訊，請重新開始翻譯。');
+    }
     this.pc = new RTCPeerConnection();
-    for (const track of stream.getAudioTracks()) {
+    for (const track of audioTracks) {
       this.pc.addTrack(track, stream);
-      track.onended = () => this.fail('麥克風已中斷，請重新開始翻譯。');
+      this.watchAudioTrack(track);
     }
     this.dc = this.pc.createDataChannel('oai-events');
     this.dc.onmessage = message => {
@@ -57,6 +61,20 @@ export class RealtimeTranslator {
     this.limitTimer = setTimeout(() => this.fail('本次翻譯已滿 10 分鐘，已停止收音；可以再次開始。'), 10 * 60000);
   }
   send(event) { if (!this.closed && this.dc?.readyState === 'open') this.dc.send(JSON.stringify(event)); }
+  watchAudioTrack(track) {
+    // A live WebRTC connection does not mean the capture source is supplying audio.
+    // Tolerate a brief route change, but never silently keep a muted session alive.
+    track.onended = () => this.fail('麥克風已中斷，請重新開始翻譯。');
+    track.onmute = () => {
+      if (this.closed || this.muteTimer) return;
+      this.muteTimer = setTimeout(() => {
+        this.muteTimer = null;
+        if (track.muted) this.fail('麥克風音訊已中斷超過 3 秒，已停止收音。請確認通話或耳機狀態後重新開始。');
+      }, 3000);
+    };
+    track.onunmute = () => { clearTimeout(this.muteTimer); this.muteTimer = null; };
+    if (track.muted) track.onmute();
+  }
   handle(e) {
     if (this.closed) return;
     if (e.type === 'input_audio_buffer.speech_started') this.onState('listening');
@@ -142,8 +160,8 @@ export class RealtimeTranslator {
   stop() {
     if (this.closed) return;
     this.closed = true; this.abort.abort(); this.readyReject?.(new Error('已停止連線'));
-    for (const timer of [this.limitTimer, this.connectTimer, this.responseTimer, this.disconnectTimer]) clearTimeout(timer);
-    this.dc?.close(); this.pc?.close(); this.stream?.getTracks().forEach(t => { t.onended = null; t.stop(); });
+    for (const timer of [this.limitTimer, this.connectTimer, this.responseTimer, this.disconnectTimer, this.muteTimer]) clearTimeout(timer);
+    this.dc?.close(); this.pc?.close(); this.stream?.getTracks().forEach(t => { t.onended = null; t.onmute = null; t.onunmute = null; t.stop(); });
     this.queue = []; this.responses.clear(); this.seen.clear();
     for (const turn of this.turns.values()) clearTimeout(turn.timer);
     this.turns.clear();

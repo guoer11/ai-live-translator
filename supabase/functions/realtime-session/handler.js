@@ -6,7 +6,8 @@ export function sessionConfig(language, model) {
     audio: { input: { transcription: { model: 'gpt-4o-mini-transcribe',
       prompt: `A face-to-face conversation in Mandarin Chinese (Taiwan) and ${LANGUAGES[language]}. Only these two languages are expected. Transcribe Chinese using Traditional Chinese characters, preserving Taiwan vocabulary. Transcribe what is actually audible in the original language, without translating or inventing words from background noise.`
     }, noise_reduction: { type: 'near_field' },
-      turn_detection: { type: 'server_vad', threshold: 0.55, prefix_padding_ms: 500, silence_duration_ms: 1000, create_response: false, interrupt_response: false } } },
+      // Modest sensitivity/pause adjustment; real-device accuracy still needs validation.
+      turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 700, silence_duration_ms: 1200, create_response: false, interrupt_response: false } } },
   };
 }
 async function equalSecret(a, b) {
