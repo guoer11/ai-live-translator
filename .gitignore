@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+supabase/.temp/
+.sites-runtime/
+node_modules/
+*.zip
