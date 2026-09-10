@@ -11,7 +11,13 @@ $('retention').value = String(history.minutes);
 $('font-size').value = prefs.large ? 'large' : 'normal';
 document.body.classList.toggle('large', !!prefs.large);
 let accessCode = '', client = null, started = 0, wakeLock = null, demoMode = false;
+let updateReady = false, updateReloading = false;
 function notice(text = '') { $('notice').textContent = text; $('notice').hidden = !text; }
+function reloadForUpdate() {
+  if (updateReloading || client) return;
+  updateReloading = true;
+  window.location.reload();
+}
 function state(value) {
   $('status').textContent = { connecting: '正在連線…', listening: '收音中', translating: '正在翻譯…', stopped: '已停止', demo: '字幕示範 · 非即時翻譯' }[value] || '尚未開始';
   $('empty-title').textContent = { connecting: '正在連線…', listening: '聽取中…', translating: '正在翻譯…' }[value] || '準備好，就開始說話';
@@ -73,6 +79,7 @@ function stop(message = '') {
   wakeLock?.release().catch(() => {}); wakeLock = null;
   history.items.forEach(x => { if (x.status === 'pending') x.status = 'interrupted'; });
   history.save(); controls(false); state('stopped'); if (message) notice(message); render();
+  if (updateReady) setTimeout(reloadForUpdate, 0);
 }
 $('start').onclick = async () => {
   if (client) { stop(); return; }
@@ -124,6 +131,27 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && cli
 window.addEventListener('pagehide', () => { if (client) stop(); });
 window.addEventListener('offline', () => { if (client) stop('網路已中斷，已停止收音。'); else notice('目前離線，可以查看尚未到期的字幕。'); });
 window.addEventListener('online', () => notice('網路已恢復，可以開始翻譯。'));
-if ('serviceWorker' in navigator) navigator.serviceWorker.register(new URL('../sw.js', import.meta.url), { scope: new URL('../', import.meta.url).pathname }).catch(() => notice('離線快取無法啟用；有網路時仍可使用翻譯。'));
+if ('serviceWorker' in navigator) {
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) { hadController = true; return; }
+    updateReady = true;
+    if (client) notice('新版本已下載，停止翻譯後會自動更新。');
+    else reloadForUpdate();
+  });
+  navigator.serviceWorker.register(new URL('../sw.js', import.meta.url), { scope: new URL('../', import.meta.url).pathname }).then(registration => {
+    const activate = worker => {
+      if (worker?.state === 'installed' && navigator.serviceWorker.controller) worker.postMessage({ type: 'SKIP_WAITING' });
+    };
+    if (registration.waiting) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+    registration.addEventListener('updatefound', () => {
+      const worker = registration.installing;
+      if (!worker) return;
+      worker.addEventListener('statechange', () => activate(worker));
+    });
+    registration.update().catch(() => {});
+    setInterval(() => registration.update().catch(() => {}), 5 * 60 * 1000);
+  }).catch(() => notice('離線快取無法啟用；有網路時仍可使用翻譯。'));
+}
 render();
 if (!config.sessionEndpoint) notice('即時翻譯尚待後端設定完成。可先點「先看字幕示範」查看介面。');
