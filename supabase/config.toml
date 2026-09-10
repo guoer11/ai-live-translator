@@ -1,0 +1,6 @@
+project_id = "ai-live-translator"
+
+[functions.realtime-session]
+# V1 has no accounts. handler.js requires a separate test access code.
+verify_jwt = false
+entrypoint = "./functions/realtime-session/index.ts"

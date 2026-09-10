@@ -1,0 +1,10 @@
+{
+  "id": "./", "name": "AI 即時翻譯", "short_name": "即時翻譯", "lang": "zh-Hant",
+  "description": "繁中與英文、日文、韓文雙向即時翻譯",
+  "start_url": "./", "scope": "./", "display": "standalone",
+  "background_color": "#f3f6fa", "theme_color": "#132c41",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
