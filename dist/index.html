@@ -1,34 +1,13 @@
 <!doctype html>
-<html lang="zh-Hant">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#132c41"><meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="即時翻譯">
-  <meta name="description" content="繁中與英文、日文、韓文雙向即時翻譯。">
-  <link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="icon" href="./icons/icon-192.png"><link rel="stylesheet" href="./style.css">
-  <title>即時翻譯 · AI Live Translate</title>
-</head>
-<body>
-<div class="app">
-  <header><a class="brand" href="./" aria-label="即時翻譯首頁"><span class="brand-icon" aria-hidden="true">文</span><span>即時翻譯<small>AI LIVE TRANSLATE</small></span></a><button id="settings-button" class="icon-button" aria-label="開啟設定">設定</button></header>
-  <main>
-    <div class="heading"><div><p class="eyebrow">LIVE TRANSLATION</p><h1>讓對話，接得上。</h1></div><span class="version">V0.1</span></div>
-    <section class="language-bar" aria-label="翻譯語言"><span class="language"><small>你的語言</small><strong>繁體中文</strong></span><span class="swap" aria-label="雙向">⇄</span><label class="language"><small>對話語言</small><select id="language"><option value="en">English 英文</option><option value="ja">日本語 日文</option><option value="ko">한국어 韓文</option></select></label></section>
-    <p class="language-hint">自動判斷這兩種語言，翻成另一種語言</p>
-    <section class="live-card" aria-label="即時字幕">
-      <div class="card-top"><span id="status" role="status">尚未開始</span><span id="elapsed">00:00</span></div>
-      <div id="captions" class="captions"><p class="source" id="source">準備好，就開始說話</p><p class="translation" id="translation">讓翻譯出現在這裡。</p></div>
-      <div class="card-bottom"><span id="caption-note">原文與譯文會在這裡顯示</span><span class="wave" aria-hidden="true">▂ ▅ ▃ ▇ ▃ ▅ ▂</span></div>
-    </section>
-    <div id="notice" class="notice" role="status" hidden></div>
-    <button id="start" class="start"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg><span id="start-label">開始翻譯</span></button>
-    <p class="privacy">開始後會將麥克風語音傳送給 OpenAI 進行翻譯。<br>切到背景或鎖定螢幕時會停止收音。</p>
-    <section class="history-section" aria-labelledby="history-title"><div class="history-header"><h2 id="history-title">剛剛的對話 <span id="count">0</span></h2><button id="clear" class="text-button">清除</button></div><p class="history-hint" id="retention-label">只保留最近 10 分鐘，不同步到其他裝置</p><ol id="history"></ol><div id="empty" class="empty"><span aria-hidden="true">“</span><p>不用急著記住每一句</p><small>翻過的內容，可以在這裡往回看。</small></div></section>
-    <div class="demo-row"><button class="text-button" id="demo">先看字幕示範</button><span>示範不會開啟麥克風</span></div>
-    <details class="install"><summary>加入 iPhone／iPad 主畫面</summary><p>用 Safari 開啟網站，點「分享」→「加入主畫面」。首次開始翻譯時，請允許使用麥克風。即時翻譯需要網路，離線時只能開啟介面與查看尚未到期的字幕。</p></details>
-  </main><footer>AI 即時翻譯 <span>V0.1.1</span></footer>
+<html lang="zh-Hant"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="即時翻譯">
+<meta name="description" content="繁中與英文、日文、韓文雙向即時翻譯。">
+<link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icons/apple-touch-icon.png"><link rel="icon" href="./icons/icon-192.png"><link rel="stylesheet" href="./style.css"><title>即時翻譯 · AI Live Translate</title></head>
+<body><div class="app">
+<header><h1 class="sr-only">即時翻譯</h1><div class="language-bar" aria-label="翻譯語言"><span>中文<small>（繁體）</small></span><span class="swap" aria-label="雙向自動翻譯">⇄</span><label><span class="sr-only">對話語言</span><select id="language"><option value="en">英文</option><option value="ja">日文</option><option value="ko">韓文</option></select></label></div><button id="settings-button" class="icon-button" aria-label="開啟設定">•••</button></header>
+<main class="conversation-panel"><section id="conversation" class="conversation" aria-label="即時字幕與最近對話" tabindex="0"><ol id="history" aria-label="對話內容"></ol><div id="empty" class="empty"><p id="empty-title">準備好，就開始說話</p><small>點下方麥克風，開始雙向翻譯</small></div></section><button id="jump-latest" class="jump-latest" hidden>↓ 回到最新對話</button></main>
+<footer class="microphone-bar"><div id="notice" class="notice" role="status" hidden></div><div class="session-status"><span id="status" role="status">尚未開始</span><time id="elapsed">00:00</time></div><button id="start" class="start" aria-label="開始翻譯" aria-pressed="false"><svg class="mic-icon" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg><svg class="pause-icon" width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg><span id="start-label" class="sr-only">開始翻譯</span></button><p class="microphone-hint">點一下開始／停止</p></footer>
 </div>
-<dialog id="settings"><form id="settings-form"><div class="dialog-header"><h2>翻譯設定</h2><button type="button" id="close-settings" class="text-button">關閉</button></div><label>對話保留時間<select id="retention"><option value="10">最近 10 分鐘</option><option value="5">最近 5 分鐘</option></select></label><label>字幕大小<select id="font-size"><option value="normal">標準</option><option value="large">放大</option></select></label><label>測試使用碼<input id="access-code" type="password" autocomplete="off" maxlength="200" placeholder="由管理者提供"></label><p class="settings-note">測試版以使用碼限制 API 用量，不需建立帳號。使用碼只保留在目前分頁的記憶體，重新整理後需再輸入。</p><button class="save" type="submit">儲存設定</button></form></dialog>
-<script type="module" src="./src/app.js"></script>
-</body></html>
+<dialog id="settings"><form id="settings-form"><div class="dialog-header"><h2>翻譯設定</h2><button type="button" id="close-settings" class="text-button">關閉</button></div><label>對話保留時間<select id="retention"><option value="10">最近 10 分鐘</option><option value="5">最近 5 分鐘</option></select></label><label>字幕大小<select id="font-size"><option value="normal">標準</option><option value="large">放大</option></select></label><label>測試使用碼<input id="access-code" type="password" autocomplete="off" maxlength="200" placeholder="由管理者提供"></label><p class="settings-note">使用碼只保留在目前分頁的記憶體，重新整理後需再輸入。開始後會將麥克風語音傳送給 OpenAI 進行翻譯；切到背景或鎖定螢幕會停止收音。</p><button class="save" type="submit">儲存設定</button><div class="history-tools"><span>最近對話 <span id="count">0</span> 句</span><button type="button" id="clear" class="text-button">清除對話</button></div><p class="settings-note" id="retention-label"></p><button type="button" class="text-button" id="demo">先看字幕示範</button><details class="install"><summary>加入 iPhone／iPad 主畫面</summary><p>用 Safari 開啟網站，點「分享」→「加入主畫面」。首次使用請允許麥克風。翻譯需要網路，離線時只能查看尚未到期的字幕。</p></details><p class="settings-note">AI 即時翻譯 · V0.1.2</p></form></dialog>
+<script type="module" src="./src/app.js"></script></body></html>

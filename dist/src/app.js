@@ -14,19 +14,28 @@ let accessCode = '', client = null, started = 0, wakeLock = null, demoMode = fal
 function notice(text = '') { $('notice').textContent = text; $('notice').hidden = !text; }
 function state(value) {
   $('status').textContent = { connecting: '正在連線…', listening: '收音中', translating: '正在翻譯…', stopped: '已停止', demo: '字幕示範 · 非即時翻譯' }[value] || '尚未開始';
+  $('empty-title').textContent = { connecting: '正在連線…', listening: '聽取中…', translating: '正在翻譯…' }[value] || '準備好，就開始說話';
 }
 function controls(active) {
   $('language').disabled = active; $('demo').disabled = active; $('settings-button').disabled = active; $('clear').disabled = active;
-  $('start').dataset.active = String(active); document.querySelector('.live-card').dataset.active = String(active);
+  $('start').dataset.active = String(active);
+  $('start').setAttribute('aria-pressed', String(active));
+  $('start').setAttribute('aria-label', active ? '停止翻譯' : '開始翻譯');
   $('start-label').textContent = active ? '停止翻譯' : '開始翻譯';
 }
 function render() {
+  const pane = $('conversation');
+  const followLatest = pane.scrollHeight - pane.clientHeight - pane.scrollTop < 80;
+  const anchor = [...$('history').children].find(li => li.getBoundingClientRect().bottom > pane.getBoundingClientRect().top);
+  const anchorOffset = anchor?.getBoundingClientRect().top;
+  const anchorId = anchor?.dataset.id;
   history.prune(); $('count').textContent = history.items.length;
   $('retention-label').textContent = `只保留最近 ${history.minutes} 分鐘，不同步到其他裝置`;
   $('empty').hidden = history.items.length > 0;
   const frag = document.createDocumentFragment();
-  for (const row of [...history.items].reverse()) {
+  for (const row of history.items) {
     const li = document.createElement('li');
+    li.dataset.id = row.id; li.dataset.status = row.status;
     const time = document.createElement('time'); time.dateTime = new Date(row.at).toISOString(); time.textContent = new Date(row.at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) + (row.demo ? ' · 示範' : '');
     const original = document.createElement('p'); original.className = 'original'; original.textContent = row.original || '辨識原文中…';
     const translated = document.createElement('p'); translated.className = 'translated'; translated.textContent = row.translated || (row.status === 'pending' ? '翻譯中…' : '未完成翻譯');
@@ -35,11 +44,19 @@ function render() {
     frag.append(li);
   }
   $('history').replaceChildren(frag);
-  const latest = history.items.at(-1);
-  $('source').textContent = latest?.original || (latest ? '辨識原文中…' : '準備好，就開始說話');
-  $('translation').textContent = latest?.translated || (latest ? (latest.status === 'pending' ? '翻譯中…' : '未完成翻譯') : '讓翻譯出現在這裡。');
-  $('caption-note').textContent = latest?.demo ? '這是預先準備的示範字幕' : '原文與譯文會在這裡顯示';
+  if (followLatest) pane.scrollTop = pane.scrollHeight;
+  else {
+    const restored = [...$('history').children].find(li => li.dataset.id === anchorId);
+    if (restored) pane.scrollTop += restored.getBoundingClientRect().top - anchorOffset;
+  }
+  updateJump();
 }
+function updateJump() {
+  const pane = $('conversation');
+  $('jump-latest').hidden = pane.scrollHeight - pane.clientHeight - pane.scrollTop < 80;
+}
+$('conversation').addEventListener('scroll', updateJump, { passive: true });
+$('jump-latest').onclick = () => { $('conversation').scrollTop = $('conversation').scrollHeight; updateJump(); };
 function onEvent(e) {
   if (e.kind === 'input') history.add({ id: e.id });
   // ASR and model output are independent; upsert allows either event ordering.
@@ -92,10 +109,12 @@ function savePreferences() { try { localStorage.setItem('translator.preferences'
 $('language').onchange = () => { savePreferences(); if (demoMode) { history.items = history.items.filter(x => !x.demo); history.save(); demoMode = false; state('stopped'); render(); } };
 $('clear').onclick = () => { history.clear(); demoMode = false; state('stopped'); render(); };
 $('demo').onclick = () => {
+  $('settings').close();
   const text = { en: ['Excuse me, how do I get to the station?', '不好意思，請問車站怎麼走？'], ja: ['すみません、駅はどこですか？', '不好意思，請問車站在哪裡？'], ko: ['실례합니다. 역이 어디에 있나요?', '不好意思，請問車站在哪裡？'] }[$('language').value];
   history.items = history.items.filter(x => !x.demo);
   history.add({ id: 'demo-' + Date.now(), original: text[0], translated: text[1], status: 'done', demo: true });
   demoMode = true; state('demo'); notice('這是字幕顯示示範，沒有開啟麥克風或呼叫翻譯服務。'); render();
+  $('conversation').scrollTop = $('conversation').scrollHeight; updateJump();
 };
 setInterval(() => {
   const count = history.items.length; history.prune(); if (count !== history.items.length) render();
