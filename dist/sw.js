@@ -1,6 +1,6 @@
-const CACHE = 'ai-translator-v0.1.0-deploy1';
+const CACHE = 'ai-translator-v0.1.1';
 const ROOT = new URL('./', self.location.href);
-const ASSETS = ['./', './index.html', './style.css', './config.js', './src/app.js', './src/history.js', './src/realtime.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
+const ASSETS = ['./', './index.html', './style.css', './config.js', './src/app.js', './src/history.js', './src/realtime.js', './src/language.js', './vendor/opencc/cn2t.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS.map(p => new URL(p, ROOT).href)))); });
 // Do not force an update into an ongoing microphone session. New worker waits
 // until all tabs using the old version close.

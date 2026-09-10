@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { History } from '../dist/src/history.js';
 import { RealtimeTranslator } from '../dist/src/realtime.js';
 import { createHandler } from '../supabase/functions/realtime-session/handler.js';
+import { prepareTranscript, cleanTranslation } from '../dist/src/language.js';
 const envValues = { ALLOWED_ORIGINS: 'https://guoer11.github.io', OPENAI_API_KEY: 'server-only-key', TRANSLATOR_ACCESS_CODE: 'a-long-test-code-12345', SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'private-role-key' };
 const request = (body = { sdp: 'v=0\r\n', language: 'en' }, code = envValues.TRANSLATOR_ACCESS_CODE, origin = envValues.ALLOWED_ORIGINS) => new Request('https://example.supabase.co/functions/v1/realtime-session', { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-access-code': code }, body: JSON.stringify(body) });
 const handler = fetcher => createHandler({ env: key => envValues[key], fetcher });
@@ -18,20 +19,49 @@ test('retention shortening and reload interrupt unfinished entries', () => {
   const resumed = new History(storage, 10, () => now); assert.equal(resumed.items[0].status, 'interrupted');
   now += 6 * 60000; h.minutes = 5; h.prune(); assert.equal(h.items.length, 0);
 });
-test('multiple committed turns are queued and late transcripts retain item identity', () => {
+test('translation waits for the exact displayed ASR text and respects speech order', () => {
   const sent = [], events = []; const c = new RealtimeTranslator({ onEvent: e => events.push(e), onState: () => {}, onError: assert.fail });
   c.dc = { readyState: 'open', send: s => sent.push(JSON.parse(s)), close() {} };
   c.handle({ type: 'input_audio_buffer.committed', item_id: 'first' });
   c.handle({ type: 'input_audio_buffer.committed', item_id: 'second' });
   c.handle({ type: 'input_audio_buffer.committed', item_id: 'second' });
+  assert.equal(sent.length, 0);
+  c.handle({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'second', transcript: 'Goodbye' });
+  assert.equal(sent.length, 0, 'later ASR must not jump ahead of earlier speech');
+  c.handle({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'first', transcript: 'Hello' });
   assert.equal(sent.length, 1);
+  assert.equal(sent[0].response.input[0].content[0].text, 'Hello');
+  assert.equal(sent[0].response.input[0].type, 'message', 'never independently reinterpret audio');
   c.handle({ type: 'response.created', response: { id: 'r1', metadata: { input_item_id: 'first' } } });
   c.handle({ type: 'response.output_text.delta', response_id: 'r1', delta: '你好' });
   c.handle({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'second', transcript: 'Goodbye' });
   c.handle({ type: 'response.done', response: { id: 'r1', status: 'completed', output: [{ content: [{ type: 'output_text', text: '你好' }] }] } });
-  assert.equal(sent.length, 2); assert.equal(sent[1].response.input[0].id, 'second');
-  assert.equal(events.find(x => x.kind === 'delta').id, 'first');
+  assert.equal(sent.length, 2); assert.equal(sent[1].response.input[0].content[0].text, 'Goodbye');
+  assert.equal(events.find(x => x.kind === 'translation').id, 'first');
   assert.equal(events.find(x => x.kind === 'original').id, 'second'); c.stop();
+});
+test('Chinese is Traditional and Korean/Japanese are rejected outside selected pairs', () => {
+  assert.equal(prepareTranscript('北京的冬天是非常冷的。', 'en').original, '北京的冬天是非常冷的。');
+  assert.equal(prepareTranscript('你可能起来天国东我在罗什巴。', 'en').original, '你可能起來天國東我在羅什巴。');
+  assert.equal(prepareTranscript('그때', 'en'), null);
+  assert.equal(prepareTranscript('駅はどこですか？', 'en'), null);
+  assert.equal(prepareTranscript('駅はどこですか？', 'ja').original, '駅はどこですか？');
+  assert.equal(prepareTranscript('그때', 'ko').targetLanguage, 'zh');
+  assert.equal(prepareTranscript('北京的冬天', 'en').targetLanguage, 'en');
+  assert.equal(cleanTranslation('这是我的车站。', 'zh'), '這是我的車站。');
+  assert.equal(cleanTranslation('그때', 'zh'), null);
+  assert.equal(cleanTranslation('我无法开启档案', 'en'), null);
+});
+test('rejected ASR does not reach translator, and subsequent speech still works', () => {
+  const sent = [], events = []; const c = new RealtimeTranslator({ language: 'en', onEvent: e => events.push(e), onState: () => {}, onError: assert.fail });
+  c.dc = { readyState: 'open', send: s => sent.push(JSON.parse(s)), close() {} };
+  c.handle({ type: 'input_audio_buffer.committed', item_id: 'bad' });
+  c.handle({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'bad', transcript: '그때' });
+  assert.equal(sent.length, 0); assert.ok(events.some(e => e.status === 'failed'));
+  c.handle({ type: 'input_audio_buffer.committed', item_id: 'good' });
+  c.handle({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'good', transcript: '请问车站怎么走？' });
+  assert.equal(sent[0].response.input[0].content[0].text, '請問車站怎麼走？');
+  assert.ok(sent[0].response.instructions.includes('American English')); c.stop();
 });
 test('stop closes microphone, connection, and suppresses late events', () => {
   let stopped = 0, closed = 0, events = 0;

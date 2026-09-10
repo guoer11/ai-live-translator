@@ -1,15 +1,17 @@
-// WebRTC transports microphone audio. The data channel carries subtitles/control only.
+import { prepareTranscript, cleanTranslation, translationInstructions } from './language.js';
+// The displayed ASR text is the sole translation input, never a second audio interpretation.
 export class RealtimeTranslator {
   constructor({ endpoint, language, accessCode, onEvent, onState, onError }) {
     Object.assign(this, { endpoint, language, accessCode, onEvent, onState, onError });
     this.closed = false; this.queue = []; this.active = null; this.responses = new Map();
     this.seen = new Set(); this.abort = new AbortController();
+    this.turns = new Map();
   }
   async start() {
     if (!globalThis.isSecureContext) throw new Error('請使用 HTTPS 網址開啟翻譯。');
     if (!navigator.mediaDevices?.getUserMedia || !globalThis.RTCPeerConnection) throw new Error('這個瀏覽器不支援麥克風即時翻譯，請改用 Safari。');
     this.onState('connecting');
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: { ideal: 1 }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
     if (this.closed) { stream.getTracks().forEach(t => t.stop()); return; }
     this.stream = stream;
     this.pc = new RTCPeerConnection();
@@ -59,38 +61,80 @@ export class RealtimeTranslator {
     if (this.closed) return;
     if (e.type === 'input_audio_buffer.speech_started') this.onState('listening');
     if (e.type === 'input_audio_buffer.committed' && !this.seen.has(e.item_id)) {
-      this.seen.add(e.item_id);
-      this.onEvent({ kind: 'input', id: e.item_id });
-      this.queue.push(e.item_id); this.next();
+      this.reserve(e.item_id);
     }
     if (e.type === 'conversation.item.input_audio_transcription.completed') {
-      this.onEvent({ kind: 'original', id: e.item_id, text: e.transcript });
+      this.reserve(e.item_id);
+      const turn = this.turns.get(e.item_id);
+      if (turn.state !== 'waiting') return;
+      clearTimeout(turn.timer);
+      const parsed = prepareTranscript(e.transcript, this.language);
+      if (!parsed) { this.rejectTurn(e.item_id, '這句沒有辨識到選定的語言，請再說一次。'); return; }
+      Object.assign(turn, parsed, { state: 'ready' });
+      this.onEvent({ kind: 'original', id: e.item_id, text: parsed.original });
+      this.next();
     }
     if (e.type === 'conversation.item.input_audio_transcription.failed') {
-      this.onEvent({ kind: 'original', id: e.item_id, text: '（這句原文無法辨識）' });
+      this.reserve(e.item_id);
+      if (this.turns.get(e.item_id).state === 'waiting') this.rejectTurn(e.item_id, '這句原文無法辨識，請再說一次。');
     }
     if (e.type === 'response.created') this.responses.set(e.response.id, e.response.metadata?.input_item_id || this.active);
     const id = this.responses.get(e.response_id);
-    if (e.type === 'response.output_text.delta' && id) this.onEvent({ kind: 'delta', id, text: e.delta });
-    if (e.type === 'response.output_text.done' && id) this.onEvent({ kind: 'translation', id, text: e.text });
+    if (e.type === 'response.output_text.delta' && id) {
+      const turn = this.turns.get(id);
+      turn.output = (turn.output || '') + e.delta;
+      this.publishTranslation(id, turn.output);
+    }
+    if (e.type === 'response.output_text.done' && id) {
+      this.turns.get(id).output = e.text;
+      this.publishTranslation(id, e.text);
+    }
     if (e.type === 'response.done') {
       const inputId = this.responses.get(e.response.id) || e.response.metadata?.input_item_id;
       const text = (e.response.output || []).flatMap(x => x.content || []).filter(x => x.type === 'output_text').map(x => x.text).join('\n');
-      if (inputId) this.onEvent({ kind: 'done', id: inputId, text, status: e.response.status === 'completed' ? 'done' : 'failed' });
+      if (inputId && this.turns.has(inputId)) {
+        const turn = this.turns.get(inputId);
+        const cleaned = cleanTranslation(text || turn.output || '', turn.targetLanguage);
+        turn.state = 'done';
+        this.onEvent({ kind: 'done', id: inputId, text: cleaned?.trim() ? cleaned : '（翻譯無法確認，請再說一次）', status: e.response.status === 'completed' && cleaned?.trim() ? 'done' : 'failed' });
+      }
       this.responses.delete(e.response.id);
       if (inputId === this.active) { clearTimeout(this.responseTimer); this.active = null; this.next(); }
     }
     if (e.type === 'error') this.fail('翻譯服務回報錯誤，請停止後重試。');
   }
+  reserve(id) {
+    if (this.seen.has(id)) return;
+    this.seen.add(id);
+    this.turns.set(id, { state: 'waiting', timer: setTimeout(() => this.rejectTurn(id, '原文辨識逾時，請再說一次。'), 20000) });
+    this.onEvent({ kind: 'input', id }); this.queue.push(id);
+  }
+  rejectTurn(id, message) {
+    if (this.closed) return;
+    const turn = this.turns.get(id); if (!turn || turn.state === 'failed') return;
+    clearTimeout(turn.timer); turn.state = 'failed';
+    this.onEvent({ kind: 'original', id, text: '（語音未確認）' });
+    this.onEvent({ kind: 'done', id, text: message, status: 'failed' });
+    this.next();
+  }
+  publishTranslation(id, text) {
+    const cleaned = cleanTranslation(text, this.turns.get(id).targetLanguage);
+    this.onEvent({ kind: 'translation', id, text: cleaned === null ? '（正在確認翻譯語言…）' : cleaned });
+  }
   next() {
     if (this.closed || this.active) return;
-    const id = this.queue.shift();
+    while (this.queue.length && this.turns.get(this.queue[0])?.state === 'failed') this.queue.shift();
+    const id = this.queue[0];
     if (!id) { this.onState('listening'); return; }
+    const turn = this.turns.get(id);
+    if (turn.state !== 'ready') return;
+    this.queue.shift(); turn.state = 'translating';
     this.active = id; this.onState('translating');
-    // One response per input item: rapid turns cannot overwrite each other's captions.
+    // Wait for ASR, then translate exactly the text displayed for this turn.
     this.send({ type: 'response.create', response: {
       conversation: 'none', metadata: { input_item_id: id }, output_modalities: ['text'],
-      input: [{ type: 'item_reference', id }],
+      instructions: translationInstructions(turn.targetLanguage),
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: turn.original }] }],
     }});
     this.responseTimer = setTimeout(() => this.fail('翻譯回應逾時，已停止收音。請重新開始。'), 45000);
   }
@@ -101,5 +145,7 @@ export class RealtimeTranslator {
     for (const timer of [this.limitTimer, this.connectTimer, this.responseTimer, this.disconnectTimer]) clearTimeout(timer);
     this.dc?.close(); this.pc?.close(); this.stream?.getTracks().forEach(t => { t.onended = null; t.stop(); });
     this.queue = []; this.responses.clear(); this.seen.clear();
+    for (const turn of this.turns.values()) clearTimeout(turn.timer);
+    this.turns.clear();
   }
 }

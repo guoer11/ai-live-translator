@@ -27,7 +27,7 @@
     <section class="history-section" aria-labelledby="history-title"><div class="history-header"><h2 id="history-title">剛剛的對話 <span id="count">0</span></h2><button id="clear" class="text-button">清除</button></div><p class="history-hint" id="retention-label">只保留最近 10 分鐘，不同步到其他裝置</p><ol id="history"></ol><div id="empty" class="empty"><span aria-hidden="true">“</span><p>不用急著記住每一句</p><small>翻過的內容，可以在這裡往回看。</small></div></section>
     <div class="demo-row"><button class="text-button" id="demo">先看字幕示範</button><span>示範不會開啟麥克風</span></div>
     <details class="install"><summary>加入 iPhone／iPad 主畫面</summary><p>用 Safari 開啟網站，點「分享」→「加入主畫面」。首次開始翻譯時，請允許使用麥克風。即時翻譯需要網路，離線時只能開啟介面與查看尚未到期的字幕。</p></details>
-  </main><footer>AI 即時翻譯 <span>V0.1.0</span></footer>
+  </main><footer>AI 即時翻譯 <span>V0.1.1</span></footer>
 </div>
 <dialog id="settings"><form id="settings-form"><div class="dialog-header"><h2>翻譯設定</h2><button type="button" id="close-settings" class="text-button">關閉</button></div><label>對話保留時間<select id="retention"><option value="10">最近 10 分鐘</option><option value="5">最近 5 分鐘</option></select></label><label>字幕大小<select id="font-size"><option value="normal">標準</option><option value="large">放大</option></select></label><label>測試使用碼<input id="access-code" type="password" autocomplete="off" maxlength="200" placeholder="由管理者提供"></label><p class="settings-note">測試版以使用碼限制 API 用量，不需建立帳號。使用碼只保留在目前分頁的記憶體，重新整理後需再輸入。</p><button class="save" type="submit">儲存設定</button></form></dialog>
 <script type="module" src="./src/app.js"></script>
