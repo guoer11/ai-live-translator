@@ -19,7 +19,7 @@ async function setState(patch) {
 }
 
 async function clearState(message = '') {
-  const next = { running: false, tabId: null, language: null, size: null, source: null, sessionId: null, message };
+  const next = { running: false, tabId: null, language: null, size: null, source: null, captionKind: null, sessionId: null, message };
   await chrome.storage.session.set({ [STATE_KEY]: next });
   return next;
 }
@@ -144,6 +144,11 @@ async function sendToTab(tabId, message) {
   try { await chrome.tabs.sendMessage(tabId, message); } catch {}
 }
 
+function sourceMessage(selected) {
+  if (selected.source !== 'caption') return '音訊備援 → ASR → AI 翻譯';
+  return selected.captionKind === 'automatic' ? '自動字幕 → AI 翻譯' : '官方字幕 → AI 翻譯';
+}
+
 async function startTranslation(language = 'en', size = 'medium', targetTabId = null, forceAudio = false) {
   const current = await getState();
   if (current.running) return current;
@@ -199,8 +204,8 @@ async function startTranslation(language = 'en', size = 'medium', targetTabId = 
   }
 
   check();
-  const state = await setState({ running: true, tabId: tab.id, language, size, source: selected.source, sessionId,
-    message: selected.source === 'caption' ? 'YouTube 字幕 → AI 翻譯' : '分頁音訊 → ASR → AI 翻譯' });
+  const state = await setState({ running: true, tabId: tab.id, language, size, source: selected.source,
+    captionKind: selected.source === 'caption' ? selected.captionKind : null, sessionId, message: sourceMessage(selected) });
   if (selected.source === 'caption') {
     const ack = await chrome.tabs.sendMessage(tab.id, { type: 'AI_CAPTION_START', sessionId, videoId: selected.videoId });
     if (!ack?.ok) throw new Error('無法讀取影片播放位置，請重新開始。');
