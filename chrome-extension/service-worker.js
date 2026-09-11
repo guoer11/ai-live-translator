@@ -181,17 +181,9 @@ async function startTranslation(language = 'en', size = 'medium', targetTabId = 
     const sessionId = crypto.randomUUID();
 
     const response = await chrome.runtime.sendMessage({
-      target: 'offscreen',
-      type: 'START_CAPTURE',
-      streamId,
-      tabId: tab.id,
-      language,
-      accessToken: auth.accessToken,
-      endpoint: config.sessionEndpoint,
-      source: selected.source,
-      cues: selected.cues,
-      liveCaptions: !!selected.liveCaptions,
-      sessionId,
+      target: 'offscreen', type: 'START_CAPTURE', streamId, tabId: tab.id, language,
+      accessToken: auth.accessToken, endpoint: config.sessionEndpoint, source: selected.source,
+      cues: selected.cues, liveCaptions: !!selected.liveCaptions, sessionId,
     });
     if (!response?.ok) {
       await sendToTab(tab.id, { type: 'AI_TRANSLATOR_HIDE' });
@@ -251,8 +243,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const cue = message.cue;
         if (!state.liveCaptions || !cue || typeof cue.id !== 'string' || typeof cue.text !== 'string'
           || !cue.id.startsWith('live:') || !cue.text.trim() || cue.text.length > 2000) return;
-        await chrome.runtime.sendMessage({ target: 'offscreen', type: 'CAPTION_TEXT', sessionId: state.sessionId,
-          cue: { id: cue.id, text: cue.text, final: !!cue.final, at: Number(cue.at) || 0 } });
+        await chrome.runtime.sendMessage({ target: 'offscreen', type: 'CAPTION_TICK', sessionId: state.sessionId,
+          time: { liveCue: { id: cue.id, text: cue.text, final: !!cue.final, at: Number(cue.at) || 0 } },
+          paused: false, seeking: false });
       } else {
         await stopTranslation('影片已變更，重新判斷字幕來源…');
         await startTranslation(state.language, state.size, state.tabId, message.type === 'CAPTION_UNAVAILABLE');
