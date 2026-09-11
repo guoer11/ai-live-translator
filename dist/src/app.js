@@ -25,7 +25,7 @@ let account = null, authRevision = 0, starting = false;
 let standby = false, standbyTimer = null;
 const STANDBY_MS = 30000;
 function lock(message = '請使用家庭 Google 帳號登入。') {
-  account = null; stop(); history.clear(); render();
+  starting = false; account = null; stop(); history.clear(); render();
   $('settings').close(); document.querySelector('.app').hidden = true;
   $('auth-gate').hidden = false; $('auth-message').textContent = message;
 }
