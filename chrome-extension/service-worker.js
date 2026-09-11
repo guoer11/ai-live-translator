@@ -165,7 +165,10 @@ async function startTranslation(language = 'en', size = 'medium', targetTabId = 
     }
 
     await injectOverlay(tab.id);
-    await sendToTab(tab.id, { type: 'AI_TRANSLATOR_SHOW', language, size });
+    await sendToTab(tab.id, {
+      type: 'AI_TRANSLATOR_SHOW', language, size, source: selected.source,
+      captionKind: selected.source === 'caption' ? selected.captionKind : null,
+    });
     await ensureOffscreen();
     check();
 
