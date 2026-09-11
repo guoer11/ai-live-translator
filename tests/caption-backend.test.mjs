@@ -8,9 +8,11 @@ test('caption session has no ASR/VAD and inherits exact Pokémon mappings; micro
   const c=captionSessionConfig('ja','model',[{source:'ポケパッド',target:'寶可平板'}]);
   assert.equal(c.audio.input.transcription,null);assert.equal(c.audio.input.turn_detection,null);
   assert.match(c.instructions,/ポケパッド → 寶可平板/);assert.match(c.instructions,/Taiwan/);
+  assert.match(c.instructions,/Translate meaning and intent/);
   assert.equal(sessionConfig('ja','model').audio.input.turn_detection.silence_duration_ms,1200);
+  assert.equal(sessionConfig('ja','model',[],'tab').audio.input.turn_detection.silence_duration_ms,350);
 });
-test('caption backend loads ja/shared glossary and retains it across model fallback',async()=>{
+test('caption backend loads ja/shared glossary, tries full model first and retains glossary across fallback',async()=>{
   let openai=0;
   const h=createHandler({env,fetcher:async(url,init)=>{
     if(url.endsWith('/auth/v1/user'))return Response.json(user);
@@ -19,6 +21,8 @@ test('caption backend loads ja/shared glossary and retains it across model fallb
     if(url.includes('/translator_glossary')){assert.equal(new URL(url).searchParams.get('language'),'in.(ja,shared)');return Response.json([{source_text:'ポケパッド',target_text:'寶可平板'}]);}
     assert.equal(url,'https://api.openai.com/v1/realtime/calls');openai++;
     const session=JSON.parse(init.body.get('session'));assert.match(session.instructions,/寶可平板/);assert.equal(session.audio.input.transcription,null);
+    if(openai===1) assert.equal(session.model,'gpt-realtime-2.1');
+    if(openai===2) assert.equal(session.model,'gpt-realtime-2.1-mini');
     return openai===1?new Response('',{status:404}):new Response('v=0\r\n');
   }});
   assert.equal((await h(request({language:'ja',source:'caption',sdp:'v=0\r\n'}))).status,200);assert.equal(openai,2);
