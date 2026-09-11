@@ -10,6 +10,7 @@ const request = (body = { sdp: 'v=0\r\n', language: 'en' }, token = 'valid-token
 const handler = fetcher => createHandler({ env: key => envValues[key], fetcher: async (url, init) => {
   if (url.endsWith('/auth/v1/user')) return init.headers.Authorization === 'Bearer valid-token' ? Response.json(user) : new Response('', { status: 401 });
   if (url.includes('/rest/v1/translator_allowed_users')) return Response.json([{ email: user.email }]);
+  if (url.includes('/rest/v1/translator_glossary')) return Response.json([{ source_text: 'ポケパッド', target_text: '寶可平板' }]);
   return fetcher(url, init);
 } });
 
@@ -116,13 +117,18 @@ test('all language pairs use server-controlled text sessions; secrets never retu
   for (const language of ['en', 'ja', 'ko']) {
     const calls = [];
     const h = handler(async (url, init) => {
-      calls.push({ url, init }); if (calls.length === 1) return Response.json(true);
+      calls.push({ url, init });
+      if (calls.length === 1) return Response.json(true);
+      if (url.includes('/rest/v1/translator_glossary')) return Response.json([{ source_text: 'ポケパッド', target_text: '寶可平板' }]);
       const config = JSON.parse(init.body.get('session'));
       assert.deepEqual(config.output_modalities, ['text']);
       assert.equal(config.audio.input.transcription.model, 'gpt-live-transcribe');
       assert.deepEqual(config.audio.input.transcription.languages, ['zh-tw', language]);
       assert.equal(Object.hasOwn(config.audio.input.transcription, 'language'), false);
       assert.match(config.audio.input.transcription.prompt, /Traditional Chinese/);
+      assert.match(config.audio.input.transcription.prompt, /ポケパッド/);
+      assert.match(config.instructions, /寶可平板/);
+      assert.match(config.instructions, /棄牌區/);
       assert.deepEqual(config.audio.input.noise_reduction, { type: 'far_field' });
       assert.equal(config.audio.input.turn_detection.create_response, false);
       assert.deepEqual(config.audio.input.turn_detection, { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 700, silence_duration_ms: 1200, create_response: false, interrupt_response: false });
@@ -131,7 +137,7 @@ test('all language pairs use server-controlled text sessions; secrets never retu
     });
     const r = await h(request({ language, sdp: 'v=0\r\noffer' }));
     assert.equal(r.status, 200); assert.equal(await r.text(), 'v=0\r\nanswer');
-    assert.equal(r.headers.get('cache-control'), 'no-store'); assert.equal(calls.length, 2);
+    assert.equal(r.headers.get('cache-control'), 'no-store'); assert.equal(calls.length, 3);
   }
 });
 test('upstream errors are sanitized and no key config fails closed', async () => {
