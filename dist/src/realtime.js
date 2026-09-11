@@ -44,10 +44,22 @@ export class RealtimeTranslator {
     const offer = await this.pc.createOffer();
     if (this.closed) return;
     await this.pc.setLocalDescription(offer);
-    const response = await fetch(this.endpoint, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.accessToken}` },
-      body: JSON.stringify({ sdp: offer.sdp, language: this.language }), signal: this.abort.signal,
-    });
+    let response;
+    try {
+      response = await fetch(this.endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.accessToken}` },
+        body: JSON.stringify({ sdp: offer.sdp, language: this.language }), signal: this.abort.signal,
+      });
+    } catch (error) {
+      if (this.closed) throw error;
+      if (this.abort.signal.aborted) throw new Error('連線逾時，請重新開始翻譯。');
+      if (!navigator.onLine) throw new Error('網路已中斷，請確認網路後重新開始。');
+      const detail = `${error?.name || ''} ${error?.message || ''}`;
+      if (/load failed|failed to fetch|network|fetch failed/i.test(detail)) {
+        throw new Error('無法連上翻譯服務，請確認網路後再按一次麥克風。');
+      }
+      throw error;
+    }
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || '無法建立翻譯連線，請稍後再試。');
