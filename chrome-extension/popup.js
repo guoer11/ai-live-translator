@@ -25,12 +25,16 @@ function render(state = {}) {
   $('toggle').classList.toggle('running', running);
   $('language').disabled = running;
   $('size').disabled = running;
+  $('caption-display').disabled = running;
   $('toggle').disabled = !signedIn && !running;
   if (state.language) $('language').value = state.language;
   if (state.size) $('size').value = state.size;
+  if (state.captionDisplay) $('caption-display').value = state.captionDisplay;
   if (state.message) setStatus(state.message, !!state.error);
   else if (running) setStatus(state.source === 'caption'
-    ? '翻譯中，繁中會顯示在 YouTube 原字幕位置。'
+    ? (state.captionDisplay === 'bilingual'
+      ? '翻譯中，原文與繁中會一起顯示在 YouTube 字幕位置。'
+      : '翻譯中，繁中會顯示在 YouTube 原字幕位置。')
     : '翻譯中，字幕會顯示在影片下方。');
   else setStatus('準備就緒');
 }
@@ -59,7 +63,12 @@ $('toggle').addEventListener('click', async () => {
   setStatus(running ? '正在停止…' : '正在判斷字幕來源並連線…');
   try {
     const type = running ? 'STOP_TRANSLATION' : 'START_TRANSLATION';
-    const response = await send({ type, language: $('language').value, size: $('size').value });
+    const response = await send({
+      type,
+      language: $('language').value,
+      size: $('size').value,
+      captionDisplay: $('caption-display').value,
+    });
     render(response.state);
   } catch (error) {
     setStatus(error.message, true);
@@ -68,14 +77,15 @@ $('toggle').addEventListener('click', async () => {
   }
 });
 
-for (const id of ['language', 'size']) {
+for (const id of ['language', 'size', 'caption-display']) {
   $(id).addEventListener('change', () => chrome.storage.local.set({ [`pref_${id}`]: $(id).value }));
 }
 
 (async () => {
-  const prefs = await chrome.storage.local.get(['pref_language', 'pref_size']);
+  const prefs = await chrome.storage.local.get(['pref_language', 'pref_size', 'pref_caption-display']);
   if (prefs.pref_language) $('language').value = prefs.pref_language;
   if (prefs.pref_size) $('size').value = prefs.pref_size;
+  if (prefs['pref_caption-display']) $('caption-display').value = prefs['pref_caption-display'];
   try { render((await send({ type: 'GET_STATUS' })).state); }
   catch (error) { setStatus(error.message, true); }
 })();
