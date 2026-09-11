@@ -40,8 +40,16 @@ export function parseCaptions(payload) {
 }
 
 export class CaptionClock {
-  constructor(cues, emit, reset) { this.cues = cues; this.emit = emit; this.reset = reset; this.lastTime = null; this.sent = new Map(); this.epoch = 0; }
+  constructor(cues = [], emit, reset) { this.cues = cues; this.emit = emit; this.reset = reset; this.lastTime = null; this.sent = new Map(); this.epoch = 0; }
   tick(time, paused = false, seeking = false) {
+    // Live YouTube fallback: the player can expose/render captions even when timedtext
+    // returns an empty response. The service worker wraps the rendered cue here.
+    if (time && typeof time === 'object' && time.liveCue) {
+      const cue = time.liveCue;
+      if (cue && typeof cue.id === 'string' && typeof cue.text === 'string' && cue.text.trim() && cue.text.length <= 2000)
+        this.emit({ id: cue.id, text: cue.text, final: !!cue.final, at: Number(cue.at) || 0 });
+      return;
+    }
     if (!Number.isFinite(time)) return;
     if (seeking || (this.lastTime != null && (time < this.lastTime - .5 || time > this.lastTime + 2))) {
       this.sent.clear(); this.epoch++; this.reset();
