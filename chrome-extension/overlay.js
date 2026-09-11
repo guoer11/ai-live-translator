@@ -1,9 +1,15 @@
 (() => {
-  if (globalThis.__AI_LIVE_TRANSLATOR_OVERLAY__) return;
-  globalThis.__AI_LIVE_TRANSLATOR_OVERLAY__ = true;
-
+  const OVERLAY_VERSION = '0.2.6';
   const HOST_ID = '__ai_live_translate_overlay__';
   const NATIVE_CAPTION_STYLE_ID = '__ai_live_translate_hide_native_captions__';
+
+  // Extension reloads do not necessarily reload an already-open YouTube tab.
+  // Use a versioned guard so a newer overlay can refresh the existing shadow DOM
+  // instead of being blocked by a stale page-level sentinel from the previous build.
+  if (globalThis.__AI_LIVE_TRANSLATOR_OVERLAY_VERSION__ === OVERLAY_VERSION) return;
+  globalThis.__AI_LIVE_TRANSLATOR_OVERLAY_VERSION__ = OVERLAY_VERSION;
+  globalThis.__AI_LIVE_TRANSLATOR_OVERLAY__ = true;
+
   let captionMode = false;
   let captionDisplay = 'translated';
   let host = document.getElementById(HOST_ID);
@@ -20,43 +26,47 @@
     host.style.zIndex = '2147483647';
     host.style.pointerEvents = 'none';
     host.style.display = 'none';
-
-    const root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = `
-      <style>
-        .box{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans-serif;background:rgba(8,12,18,.34);color:#fff;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:8px 16px 10px;box-shadow:0 3px 16px rgba(0,0,0,.18);backdrop-filter:blur(2px);text-align:center;line-height:1.4;text-wrap:balance}
-        .original{font-size:16px;color:rgba(255,255,255,.82);margin:0 0 3px;min-height:1.2em;text-shadow:0 1px 4px rgba(0,0,0,.95),0 0 2px rgba(0,0,0,.9)}
-        .translated{font-size:30px;font-weight:700;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;text-shadow:0 2px 6px rgba(0,0,0,1),0 0 3px rgba(0,0,0,.95)}
-        .small .original{font-size:13px}.small .translated{font-size:24px}
-        .large .original{font-size:19px}.large .translated{font-size:38px}
-        .pending .translated{opacity:.9}
-        .error{background:rgba(126,24,20,.82)}
-
-        /* Caption mode visually replaces YouTube's own subtitle line. The native
-           caption DOM stays alive for capture, while this overlay can show either
-           Traditional Chinese only or source + Traditional Chinese. */
-        .caption-mode{background:transparent;border:0;border-radius:0;padding:0;box-shadow:none;backdrop-filter:none;line-height:1.35}
-        .caption-mode .original{display:none}
-        .caption-mode .translated{display:table;margin:0 auto;padding:2px 9px 4px;background:rgba(8,8,8,.72);border-radius:2px;font-size:28px;font-weight:650;line-height:1.35;-webkit-box-decoration-break:clone;box-decoration-break:clone;text-shadow:0 1px 4px rgba(0,0,0,1),0 0 2px rgba(0,0,0,.95)}
-        .caption-mode.bilingual .original{display:table;margin:0 auto 3px;padding:1px 7px 2px;min-height:0;background:rgba(8,8,8,.58);border-radius:2px;color:rgba(255,255,255,.9);font-size:16px;font-weight:500;line-height:1.3}
-        .caption-mode.small .translated{font-size:22px}
-        .caption-mode.small.bilingual .original{font-size:13px}
-        .caption-mode.large .translated{font-size:34px}
-        .caption-mode.large.bilingual .original{font-size:19px}
-        .caption-mode.error{background:transparent}
-        .caption-mode.error .translated{background:rgba(126,24,20,.86)}
-        @media(max-width:700px){.translated{font-size:25px}.large .translated{font-size:31px}.caption-mode .translated{font-size:22px}.caption-mode.large .translated{font-size:27px}.caption-mode.bilingual .original{font-size:13px}}
-      </style>
-      <div class="box medium">
-        <p class="original"></p>
-        <p class="translated">AI 即時翻譯準備中…</p>
-      </div>`;
+    host.attachShadow({ mode: 'open' });
 
     const parent = document.fullscreenElement || document.documentElement;
     parent.appendChild(host);
+  } else {
+    // Keep the existing host so any stale listener from the previous injected build
+    // cannot create a second visible overlay. We replace only its shadow contents.
+    host.style.zIndex = '2147483647';
+    host.style.pointerEvents = 'none';
   }
 
-  const root = host.shadowRoot;
+  const root = host.shadowRoot || host.attachShadow({ mode: 'open' });
+  root.innerHTML = `
+    <style>
+      .box{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans-serif;background:rgba(8,12,18,.34);color:#fff;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:8px 16px 10px;box-shadow:0 3px 16px rgba(0,0,0,.18);backdrop-filter:blur(2px);text-align:center;line-height:1.4;text-wrap:balance}
+      .original{font-size:16px;color:rgba(255,255,255,.82);margin:0 0 3px;min-height:1.2em;text-shadow:0 1px 4px rgba(0,0,0,.95),0 0 2px rgba(0,0,0,.9)}
+      .translated{font-size:30px;font-weight:700;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;text-shadow:0 2px 6px rgba(0,0,0,1),0 0 3px rgba(0,0,0,.95)}
+      .small .original{font-size:13px}.small .translated{font-size:24px}
+      .large .original{font-size:19px}.large .translated{font-size:38px}
+      .pending .translated{opacity:.9}
+      .error{background:rgba(126,24,20,.82)}
+
+      /* Caption mode replaces YouTube's native visual line while keeping its DOM
+         alive for capture. Bilingual mode shows source above the zh-TW translation. */
+      .caption-mode{background:transparent;border:0;border-radius:0;padding:0;box-shadow:none;backdrop-filter:none;line-height:1.35}
+      .caption-mode .original{display:none}
+      .caption-mode .translated{display:table;margin:0 auto;padding:2px 9px 4px;background:rgba(8,8,8,.72);border-radius:2px;font-size:28px;font-weight:650;line-height:1.35;-webkit-box-decoration-break:clone;box-decoration-break:clone;text-shadow:0 1px 4px rgba(0,0,0,1),0 0 2px rgba(0,0,0,.95)}
+      .caption-mode.bilingual .original{display:table;margin:0 auto 3px;padding:1px 7px 2px;min-height:0;background:rgba(8,8,8,.58);border-radius:2px;color:rgba(255,255,255,.92);font-size:16px;font-weight:500;line-height:1.3;white-space:pre-wrap;overflow-wrap:anywhere}
+      .caption-mode.small .translated{font-size:22px}
+      .caption-mode.small.bilingual .original{font-size:13px}
+      .caption-mode.large .translated{font-size:34px}
+      .caption-mode.large.bilingual .original{font-size:19px}
+      .caption-mode.error{background:transparent}
+      .caption-mode.error .translated{background:rgba(126,24,20,.86)}
+      @media(max-width:700px){.translated{font-size:25px}.large .translated{font-size:31px}.caption-mode .translated{font-size:22px}.caption-mode.large .translated{font-size:27px}.caption-mode.bilingual .original{font-size:13px}}
+    </style>
+    <div class="box medium">
+      <p class="original"></p>
+      <p class="translated">AI 即時翻譯準備中…</p>
+    </div>`;
+
   const box = root.querySelector('.box');
   const original = root.querySelector('.original');
   const translated = root.querySelector('.translated');
@@ -152,7 +162,8 @@
     if (message.type === 'AI_TRANSLATOR_SUBTITLE') {
       box.classList.toggle('pending', !!message.pending);
       box.classList.remove('error');
-      if (message.original) original.textContent = message.original;
+      if (captionMode && captionDisplay === 'bilingual') original.textContent = message.original || '';
+      else if (message.original) original.textContent = message.original;
       if (message.translated) translated.textContent = message.translated;
       host.style.display = 'block';
       moveIntoFullscreen();
