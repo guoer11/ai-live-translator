@@ -1,5 +1,6 @@
 let stream = null;
 let audioContext = null;
+let audioMonitorTimer = null;
 let pc = null;
 let dc = null;
 let closed = true;
@@ -12,6 +13,9 @@ let turns = new Map();
 let responses = new Map();
 let activeTurn = null;
 let responseTimer = null;
+let audioDetected = false;
+let transcriptDetected = false;
+let lastCompleted = { original: '', translated: '' };
 
 function sendRuntime(message) {
   chrome.runtime.sendMessage(message).catch(() => {});
@@ -34,8 +38,35 @@ function send(event) {
 
 function reserve(id) {
   if (!id || turns.has(id)) return;
-  turns.set(id, { id, state: 'waiting', original: '', translated: '' });
+  turns.set(id, { id, state: 'waiting', original: '', partial: '', translated: '' });
   queue.push(id);
+}
+
+function startAudioMonitor(source) {
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+  const data = new Float32Array(analyser.fftSize);
+  const startedAt = Date.now();
+  let announcedAudio = false;
+
+  clearInterval(audioMonitorTimer);
+  audioMonitorTimer = setInterval(() => {
+    if (closed || !audioContext) return;
+    analyser.getFloatTimeDomainData(data);
+    let sum = 0;
+    for (const sample of data) sum += sample * sample;
+    const rms = Math.sqrt(sum / data.length);
+    if (rms > 0.003) {
+      audioDetected = true;
+      if (!announcedAudio && !transcriptDetected && !lastCompleted.translated) {
+        announcedAudio = true;
+        publish('', '已偵測到影片音訊，正在辨識…', true);
+      }
+    } else if (!audioDetected && Date.now() - startedAt > 4500 && !transcriptDetected) {
+      publish('', '尚未偵測到分頁音訊，請確認影片正在播放且有聲音。', true);
+    }
+  }, 300);
 }
 
 function translateNext() {
@@ -49,8 +80,6 @@ function translateNext() {
   turn.state = 'translating';
   activeTurn = id;
 
-  // Do not override the server-owned session instructions here. The session
-  // contains the shared Pokémon TCG glossary and Taiwan terminology rules.
   send({
     type: 'response.create',
     response: {
@@ -72,13 +101,30 @@ function translateNext() {
 function handleEvent(event) {
   if (closed || !event?.type) return;
 
+  if (event.type === 'input_audio_buffer.speech_started') {
+    if (!lastCompleted.translated && !transcriptDetected) publish('', '偵測到語音，正在辨識…', true);
+    return;
+  }
+
   if (event.type === 'input_audio_buffer.committed') reserve(event.item_id);
+
+  if (event.type === 'conversation.item.input_audio_transcription.delta') {
+    reserve(event.item_id);
+    const turn = turns.get(event.item_id);
+    if (!turn || turn.state !== 'waiting') return;
+    transcriptDetected = true;
+    turn.partial += event.delta || '';
+    const partial = turn.partial.trim();
+    if (partial) publish(partial, lastCompleted.translated || '正在辨識並翻譯…', true);
+    return;
+  }
 
   if (event.type === 'conversation.item.input_audio_transcription.completed') {
     reserve(event.item_id);
     const turn = turns.get(event.item_id);
     if (!turn || turn.state !== 'waiting') return;
-    const original = String(event.transcript || '').trim();
+    transcriptDetected = true;
+    const original = String(event.transcript || turn.partial || '').trim();
     if (!original) {
       turn.state = 'failed';
       translateNext();
@@ -86,9 +132,7 @@ function handleEvent(event) {
     }
     turn.original = original;
     turn.state = 'ready';
-    // Keep the previous completed subtitle visible while this new sentence is
-    // being translated. Replacing it with "翻譯中…" made readable subtitles
-    // disappear too early during continuous video playback.
+    publish(original, lastCompleted.translated || '正在翻譯…', true);
     translateNext();
     return;
   }
@@ -114,8 +158,9 @@ function handleEvent(event) {
     const turn = turns.get(itemId);
     if (!turn) return;
     turn.translated += event.delta || '';
-    // Buffer partial model output. The previous completed subtitle remains on
-    // screen until the new translation is complete, preventing flicker.
+    // Show partial Chinese as soon as it exists; this makes video subtitles feel
+    // realtime while still preserving the previous completed line beforehand.
+    if (turn.translated.trim()) publish(turn.original, turn.translated.trim(), true);
     return;
   }
 
@@ -123,7 +168,10 @@ function handleEvent(event) {
     const turn = turns.get(itemId);
     if (!turn) return;
     turn.translated = String(event.text || turn.translated || '').trim();
-    if (turn.translated) publish(turn.original, turn.translated, false);
+    if (turn.translated) {
+      lastCompleted = { original: turn.original, translated: turn.translated };
+      publish(turn.original, turn.translated, false);
+    }
     return;
   }
 
@@ -139,7 +187,9 @@ function handleEvent(event) {
         .trim();
       if (text) turn.translated = text;
       turn.state = 'done';
-      publish(turn.original, turn.translated || '（翻譯無法確認）', false);
+      const translated = turn.translated || '（翻譯無法確認）';
+      lastCompleted = { original: turn.original, translated };
+      publish(turn.original, translated, false);
     }
     if (event.response?.id) responses.delete(event.response.id);
     clearTimeout(responseTimer);
@@ -159,6 +209,9 @@ async function startCapture(options) {
   language = options.language;
   endpoint = options.endpoint;
   accessToken = options.accessToken;
+  audioDetected = false;
+  transcriptDetected = false;
+  lastCompleted = { original: '', translated: '' };
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -171,10 +224,14 @@ async function startCapture(options) {
       video: false,
     });
 
+    if (!stream.getAudioTracks().length) throw new Error('這個分頁沒有可擷取的音訊軌。');
+
     // tabCapture 會讓該分頁本身靜音；把擷取到的音訊重新接回喇叭。
     audioContext = new AudioContext();
+    await audioContext.resume().catch(() => {});
     const source = audioContext.createMediaStreamSource(stream);
     source.connect(audioContext.destination);
+    startAudioMonitor(source);
 
     pc = new RTCPeerConnection();
     for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
@@ -201,7 +258,7 @@ async function startCapture(options) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ sdp: offer.sdp, language }),
+      body: JSON.stringify({ sdp: offer.sdp, language, source: 'tab' }),
       cache: 'no-store',
     });
     if (!response.ok) {
@@ -211,7 +268,7 @@ async function startCapture(options) {
     const answer = await response.text();
     await pc.setRemoteDescription({ type: 'answer', sdp: answer });
     await ready;
-    publish('', '正在聆聽影片音訊…', true);
+    publish('', '正在偵測影片音訊…', true);
   } catch (error) {
     const message = error?.message || '無法開始影片翻譯。';
     stopCapture();
@@ -222,7 +279,9 @@ async function startCapture(options) {
 function stopCapture() {
   closed = true;
   clearTimeout(responseTimer);
+  clearInterval(audioMonitorTimer);
   responseTimer = null;
+  audioMonitorTimer = null;
   try { dc?.close(); } catch {}
   try { pc?.close(); } catch {}
   for (const track of stream?.getTracks?.() || []) {
@@ -238,6 +297,9 @@ function stopCapture() {
   responses.clear();
   activeTurn = null;
   activeTabId = null;
+  audioDetected = false;
+  transcriptDetected = false;
+  lastCompleted = { original: '', translated: '' };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
