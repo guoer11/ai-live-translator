@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+  <title>AI 即時翻譯</title>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>AI 即時翻譯</h1>
+        <p>目前分頁 → 繁中字幕</p>
+      </div>
+      <span class="version">V0.1.0</span>
+    </header>
+
+    <section id="account-card" class="card">
+      <div class="row">
+        <span class="label">家庭帳號</span>
+        <span id="account">尚未登入</span>
+      </div>
+      <button id="login" class="secondary">使用 Google 登入</button>
+      <button id="logout" class="text" hidden>登出</button>
+    </section>
+
+    <section class="card controls">
+      <label>影片語言
+        <select id="language">
+          <option value="en">英文</option>
+          <option value="ja">日文</option>
+          <option value="ko">韓文</option>
+        </select>
+      </label>
+      <label>字幕大小
+        <select id="size">
+          <option value="medium">標準</option>
+          <option value="large">放大</option>
+          <option value="small">縮小</option>
+        </select>
+      </label>
+    </section>
+
+    <p id="status" class="status">準備就緒</p>
+    <button id="toggle" class="primary">開始翻譯目前分頁</button>
+    <p class="hint">支援 YouTube 與一般網頁影片。翻譯時會直接擷取這個分頁的音訊，不使用電腦麥克風。</p>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
