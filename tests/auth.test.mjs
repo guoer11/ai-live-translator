@@ -32,9 +32,9 @@ test('access check is no-store and never spends quota; removal takes effect on n
     assert.ok(url.includes('/translator_allowed_users?'));
     assert.equal(init.headers.Authorization, 'Bearer server-key');
     assert.equal(new URL(url).searchParams.get('email'), `eq.${user.email}`);
-    return Response.json(allowed ? [{ email: user.email }] : []);
+    return Response.json(allowed ? [{ email: user.email, can_manage_glossary: false }] : []);
   } });
   const r = await h(req()); assert.equal(r.status, 200); assert.equal(r.headers.get('cache-control'), 'no-store');
-  assert.deepEqual(await r.json(), { email: user.email, userId: 'user' });
+  assert.deepEqual(await r.json(), { email: user.email, userId: 'user', canManageGlossary: false });
   allowed = false; assert.equal((await h(req())).status, 403);
 });
