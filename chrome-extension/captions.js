@@ -66,7 +66,7 @@ export class CaptionTranslator {
     let item = this.items.get(cue.id);
     if (item?.text === cue.text) {
       item.final ||= cue.final;
-      if (item.translation && item.order === this.visible) this.publish(item.text, item.translation, !item.final);
+      if (item.translation && item.displayRevision === item.revision && item.order === this.visible) this.publish(item.text, item.translation, !item.final);
       return;
     }
     if (!item) { item = { id: cue.id, order: this.order++, revision: 0 }; this.items.set(cue.id, item); }
@@ -95,6 +95,9 @@ export class CaptionTranslator {
   }
   handle(event) {
     const key = event.response?.metadata?.caption_job;
+    if (event.type === 'response.created' && key?.startsWith('caption:') && !this.jobs.has(key)) {
+      this.send({ type: 'response.cancel', response_id: event.response.id }); return;
+    }
     if (event.type === 'response.created' && this.jobs.has(key)) this.jobs.get(key).responseId = event.response.id;
     const job = this.jobs.get(key) || [...this.jobs.values()].find(j => j.responseId && j.responseId === (event.response_id || event.response?.id));
     if (!job) return;
@@ -105,10 +108,10 @@ export class CaptionTranslator {
       const text = (event.response.output || []).flatMap(o => o.content || []).filter(c => c.type === 'output_text').map(c => c.text || '').join('');
       if (text) job.translation = text;
     }
-    if (item?.revision === job.revision && job.order >= this.visible && job.translation.trim()
+    if (item && job.revision >= (item.displayRevision || 0) && job.order >= this.visible && job.translation.trim()
       && ['response.output_text.delta', 'response.output_text.done', 'response.done'].includes(event.type)) {
-      this.visible = job.order; item.translation = job.translation.trim(); this.previous = item.translation;
-      this.publish(job.text, item.translation, event.type !== 'response.done' || !item.final);
+      this.visible = job.order; item.translation = job.translation.trim(); item.displayRevision = job.revision; this.previous = item.translation;
+      this.publish(job.text, item.translation, event.type !== 'response.done' || !item.final || item.revision !== job.revision);
     }
     if (event.type === 'response.done') {
       for (const [k, j] of this.jobs) if (j === job) this.jobs.delete(k);

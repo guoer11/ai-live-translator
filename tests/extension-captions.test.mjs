@@ -1,0 +1,70 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
+import { CaptionClock, CaptionTranslator, parseCaptions } from '../chrome-extension/captions.js';
+import { chooseSource } from '../chrome-extension/youtube.js';
+const track = { events: [{ tStartMs: 0, dDurationMs: 10000, segs: [{ utf8: 'ポケパッドを使います。' }] }] };
+test('automatic source selection prefers usable captions; absent, malformed or failed probes fall back', async () => {
+  const tab = { id: 1, url: 'https://www.youtube.com/watch?v=example' };
+  const ok = await chooseSource(tab, 'ja', async options => {
+    assert.equal(options.world, 'MAIN'); assert.deepEqual(options.args, ['ja']);
+    return [{ result: { videoId: 'example', payload: track } }];
+  }, parseCaptions);
+  assert.equal(ok.source, 'caption');
+  for (const result of [null, { payload: {} }, { videoId: 'example', payload: {events:[]} }])
+    assert.equal((await chooseSource(tab, 'ja', async () => [{ result }], parseCaptions)).source, 'tab');
+  assert.equal((await chooseSource(tab, 'ja', async () => { throw Error('restricted track'); }, parseCaptions)).source, 'tab');
+  assert.equal((await chooseSource({id:1,url:'https://example.com'}, 'ja', assert.fail, parseCaptions)).source, 'tab');
+});
+
+function host() {
+  const sent = [], messages = [], listeners = []; let captures = 0, stopped = 0;
+  const stream = { getAudioTracks: () => [{ stop: () => stopped++ }], getTracks: () => [{ stop: () => stopped++ }] };
+  class Peer {
+    constructor() { this.dc = { readyState: 'open', send: s => sent.push(JSON.parse(s)), close() {} }; }
+    createDataChannel() { return this.dc; }
+    addTrack() {} addTransceiver() {}
+    async createOffer() { return { sdp: 'v=0\r\n' }; }
+    async setLocalDescription() {}
+    async setRemoteDescription() { this.dc.onopen(); }
+    close() {}
+  }
+  class Audio {
+    async resume() {} async close() {}
+    createMediaStreamSource() { return { connect() {} }; }
+    createAnalyser() { return { getFloatTimeDomainData(a) { a.fill(0); } }; }
+  }
+  const context = vm.createContext({ CaptionClock, CaptionTranslator, console, setTimeout, clearTimeout, setInterval, clearInterval,
+    Date, AbortController, Float32Array, RTCPeerConnection: Peer, AudioContext: Audio,
+    navigator: { mediaDevices: { getUserMedia: async () => { captures++; return stream; } } },
+    fetch: async (_url, init) => { messages.push(JSON.parse(init.body)); return new Response('v=0\r\n'); },
+    chrome: { runtime: { id: 'test', onMessage: { addListener: f => listeners.push(f) }, sendMessage: async e => { messages.push(e); } } },
+  });
+  vm.runInContext(readFileSync(new URL('../chrome-extension/offscreen.js', import.meta.url),'utf8').replace(/^import .*;\n/, ''), context);
+  return { context, sent, messages, captures: () => captures, stopped: () => stopped, listeners };
+}
+test('real offscreen caption branch never captures audio or translates ASR events', async () => {
+  const h = host();
+  h.context.options = { tabId: 1, language: 'ja', source: 'caption', sessionId: 's', endpoint: 'https://example.com', accessToken: 'test', cues: parseCaptions(track) };
+  try {
+    await vm.runInContext('startCapture(options)',h.context);
+    assert.equal(h.captures(),0); assert.equal(h.messages[0].source,'caption');
+    vm.runInContext("handleEvent({type:'conversation.item.input_audio_transcription.completed',item_id:'audio',transcript:'ignored'})",h.context);
+    assert.equal(h.sent.length,0);
+    h.listeners[0]({target:'offscreen',type:'CAPTION_TICK',sessionId:'s',time:1,paused:false},{id:'test'},()=>{});
+    assert.equal(h.sent.length,1); assert.equal(h.sent[0].response.input[0].content[0].text,'ポケパッドを使います。');
+    h.listeners[0]({target:'offscreen',type:'CAPTION_TICK',sessionId:'s',time:1.1,paused:false},{id:'test'},()=>{});
+    assert.equal(h.sent.length,1);
+  } finally { vm.runInContext('stopCapture()',h.context); }
+});
+test('real offscreen audio fallback retains tab capture and ASR completion path', async () => {
+  const h = host(); h.context.options={tabId:1,source:'tab',language:'ja',streamId:'stream',endpoint:'https://example.com',accessToken:'test'};
+  try {
+    await vm.runInContext('startCapture(options)',h.context);
+    assert.equal(h.captures(),1); assert.equal(h.messages[0].source,'tab');
+    vm.runInContext("handleEvent({type:'conversation.item.input_audio_transcription.completed',item_id:'audio',transcript:'山札を見ます'})",h.context);
+    assert.equal(h.sent[0].response.input[0].content[0].text,'山札を見ます');
+  } finally { vm.runInContext('stopCapture()',h.context); }
+  assert.equal(h.stopped(),1);
+});

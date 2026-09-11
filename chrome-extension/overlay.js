@@ -71,8 +71,8 @@
     if (message.type === 'AI_TRANSLATOR_SUBTITLE') {
       box.classList.toggle('pending', !!message.pending);
       box.classList.remove('error');
-      original.textContent = message.original || '';
-      translated.textContent = message.translated || '翻譯中…';
+      if (message.original) original.textContent = message.original;
+      if (message.translated) translated.textContent = message.translated;
       host.style.display = 'block';
       moveIntoFullscreen();
       return;

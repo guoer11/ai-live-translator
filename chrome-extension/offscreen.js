@@ -1,4 +1,7 @@
+import { CaptionClock, CaptionTranslator } from './captions.js';
 let stream = null;
+let sourceMode = 'tab', captionClock = null, captionTranslator = null, sessionId = '';
+let generation = 0, connectAbort = null, connectTimer = null, readyReject = null;
 let audioContext = null;
 let audioMonitorTimer = null;
 let pc = null;
@@ -100,6 +103,11 @@ function translateNext() {
 
 function handleEvent(event) {
   if (closed || !event?.type) return;
+  if (sourceMode === 'caption') {
+    if (event.type === 'error' && event.error?.code !== 'response_cancel_not_active') fail('字幕翻譯服務回報錯誤，請停止後重試。');
+    else captionTranslator?.handle(event);
+    return;
+  }
 
   if (event.type === 'input_audio_buffer.speech_started') {
     if (!lastCompleted.translated && !transcriptDetected) publish('', '偵測到語音，正在辨識…', true);
@@ -204,7 +212,11 @@ function handleEvent(event) {
 
 async function startCapture(options) {
   stopCapture();
+  const run = generation;
   closed = false;
+  connectAbort = new AbortController();
+  sourceMode = options.source === 'caption' ? 'caption' : 'tab';
+  sessionId = options.sessionId;
   activeTabId = options.tabId;
   language = options.language;
   endpoint = options.endpoint;
@@ -214,7 +226,8 @@ async function startCapture(options) {
   lastCompleted = { original: '', translated: '' };
 
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
+    if (sourceMode === 'tab') {
+    const captured = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: {
           chromeMediaSource: 'tab',
@@ -223,18 +236,23 @@ async function startCapture(options) {
       },
       video: false,
     });
+    if (closed || run !== generation) { captured.getTracks().forEach(t => t.stop()); return; }
+    stream = captured;
 
     if (!stream.getAudioTracks().length) throw new Error('這個分頁沒有可擷取的音訊軌。');
 
     // tabCapture 會讓該分頁本身靜音；把擷取到的音訊重新接回喇叭。
     audioContext = new AudioContext();
     await audioContext.resume().catch(() => {});
+    if (closed || run !== generation) return;
     const source = audioContext.createMediaStreamSource(stream);
     source.connect(audioContext.destination);
     startAudioMonitor(source);
+    }
 
     pc = new RTCPeerConnection();
-    for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
+    if (sourceMode === 'tab') for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
+    else pc.addTransceiver('audio', { direction: 'recvonly' });
     dc = pc.createDataChannel('oai-events');
     dc.onmessage = message => {
       try { handleEvent(JSON.parse(message.data)); }
@@ -246,9 +264,11 @@ async function startCapture(options) {
     };
 
     const ready = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('連線逾時，請重新開始。')), 25000);
-      dc.onopen = () => { clearTimeout(timer); resolve(); };
+      readyReject = reject;
+      connectTimer = setTimeout(() => { reject(new Error('連線逾時，請重新開始。')); connectAbort?.abort(); }, 25000);
+      dc.onopen = () => { clearTimeout(connectTimer); readyReject = null; resolve(); };
     });
+    ready.catch(() => {});
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -258,26 +278,39 @@ async function startCapture(options) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ sdp: offer.sdp, language, source: 'tab' }),
+      body: JSON.stringify({ sdp: offer.sdp, language, source: sourceMode }),
       cache: 'no-store',
+      signal: connectAbort.signal,
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || '無法建立翻譯連線。');
     }
     const answer = await response.text();
+    if (closed || run !== generation) return;
     await pc.setRemoteDescription({ type: 'answer', sdp: answer });
     await ready;
-    publish('', '正在偵測影片音訊…', true);
+    if (closed || run !== generation) return;
+    if (sourceMode === 'caption') {
+      captionTranslator = new CaptionTranslator({ send, publish });
+      captionClock = new CaptionClock(options.cues, cue => captionTranslator.update(cue), () => captionTranslator.reset());
+      publish('', '字幕模式：等待影片字幕…', true);
+    } else publish('', '正在偵測影片音訊…', true);
   } catch (error) {
     const message = error?.message || '無法開始影片翻譯。';
-    stopCapture();
+    if (run === generation) stopCapture();
     throw new Error(message);
   }
 }
 
 function stopCapture() {
+  generation++;
+  captionTranslator?.stop(); captionTranslator = null; captionClock = null;
   closed = true;
+  sessionId = '';
+  connectAbort?.abort(); connectAbort = null;
+  clearTimeout(connectTimer); connectTimer = null;
+  readyReject?.(new Error('連線已取消。')); readyReject = null;
   clearTimeout(responseTimer);
   clearInterval(audioMonitorTimer);
   responseTimer = null;
@@ -303,7 +336,14 @@ function stopCapture() {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.target !== 'offscreen') return false;
+  if (message?.target !== 'offscreen' || sender.id !== chrome.runtime.id || sender.tab) return false;
+  if (message.type === 'CAPTION_TICK') {
+    if (message.sessionId === sessionId && !closed) {
+      if ([...captionTranslator?.jobs?.values() || []].some(j => Date.now() - j.started > 15000)) fail('字幕翻譯逾時，請重新開始。');
+      else captionClock?.tick(message.time, message.paused, message.seeking);
+    }
+    return false;
+  }
   (async () => {
     try {
       if (message.type === 'START_CAPTURE') {

@@ -21,11 +21,13 @@ test('fast revision is immediate, deduplicated and stale translation cannot repl
   const key=sent[0].response.metadata.caption_job;
   t.handle({type:'response.created',response:{id:'r1',metadata:{caption_job:key}}});
   t.update({id:'a',text:'ポケパッドを使います。山札を見ます',final:true});
-  t.handle({type:'response.output_text.delta',response_id:'r1',delta:'過時譯文'}); assert.equal(shown.length,0);
+  t.handle({type:'response.output_text.delta',response_id:'r1',delta:'前半句快譯'}); assert.equal(shown[0][2],true,'a usable prefix must not wait for the rest of the sentence');
   t.handle({type:'response.done',response:{id:'r1',output:[]}}); assert.equal(sent.length,2);
   const key2=sent[1].response.metadata.caption_job;
   t.handle({type:'response.created',response:{id:'r2',metadata:{caption_job:key2}}});
   t.handle({type:'response.output_text.delta',response_id:'r2',delta:'使用寶可平板'});
-  assert.equal(shown[0][1],'使用寶可平板');
-  t.update({id:'b',text:'次に引きます。',final:true}); assert.equal(shown.length,1,'new cue must retain previous Chinese');
+  assert.equal(shown.at(-1)[1],'使用寶可平板');
+  const count = shown.length;
+  t.handle({type:'response.output_text.delta',response_id:'r1',delta:'過時譯文'});
+  t.update({id:'b',text:'次に引きます。',final:true}); assert.equal(shown.length,count,'new cue must retain previous Chinese');
 });

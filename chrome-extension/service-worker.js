@@ -1,4 +1,7 @@
 import { config } from './config.js';
+import { parseCaptions } from './captions.js';
+import { chooseSource } from './youtube.js';
+let operation = 0, starting = false;
 
 const AUTH_KEY = 'translator_extension_auth_v1';
 const STATE_KEY = 'translator_extension_state_v1';
@@ -16,7 +19,7 @@ async function setState(patch) {
 }
 
 async function clearState(message = '') {
-  const next = { running: false, tabId: null, language: null, size: null, message };
+  const next = { running: false, tabId: null, language: null, size: null, source: null, sessionId: null, message };
   await chrome.storage.session.set({ [STATE_KEY]: next });
   return next;
 }
@@ -141,25 +144,42 @@ async function sendToTab(tabId, message) {
   try { await chrome.tabs.sendMessage(tabId, message); } catch {}
 }
 
-async function startTranslation(language = 'en', size = 'medium') {
+async function startTranslation(language = 'en', size = 'medium', targetTabId = null, forceAudio = false) {
   const current = await getState();
   if (current.running) return current;
+  if (starting) throw new Error('正在連線，請稍候。');
+  starting = true;
+  const run = ++operation;
+  let tab;
+  const check = () => { if (run !== operation) throw new Error('連線已取消。'); };
+  try {
   const auth = await ensureAuth();
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  tab = targetTabId ? await chrome.tabs.get(targetTabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
   if (!tab?.id) throw new Error('找不到目前分頁。');
   if (tab.url && !/^https?:\/\//i.test(tab.url)) throw new Error('請在一般網頁或 YouTube 影片分頁使用。');
+  let selected = forceAudio ? { source: 'tab' } : await chooseSource(tab, language, args => chrome.scripting.executeScript(args), parseCaptions);
+  check();
+  if (selected.source === 'caption') {
+    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['caption-source.js'] }); }
+    catch { selected = { source: 'tab' }; }
+  }
 
   await injectOverlay(tab.id);
   await sendToTab(tab.id, { type: 'AI_TRANSLATOR_SHOW', language, size });
   await ensureOffscreen();
+  check();
 
   let streamId;
+  if (selected.source === 'tab') {
   try {
     streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
   } catch {
     await sendToTab(tab.id, { type: 'AI_TRANSLATOR_HIDE' });
     throw new Error('無法擷取這個分頁的音訊，請重新整理影片頁後再試。');
   }
+  }
+  check();
+  const sessionId = crypto.randomUUID();
 
   const response = await chrome.runtime.sendMessage({
     target: 'offscreen',
@@ -169,17 +189,36 @@ async function startTranslation(language = 'en', size = 'medium') {
     language,
     accessToken: auth.accessToken,
     endpoint: config.sessionEndpoint,
+    source: selected.source,
+    cues: selected.cues,
+    sessionId,
   });
   if (!response?.ok) {
     await sendToTab(tab.id, { type: 'AI_TRANSLATOR_HIDE' });
     throw new Error(response?.error || '無法開始分頁翻譯。');
   }
 
-  return setState({ running: true, tabId: tab.id, language, size, message: '翻譯中，字幕會顯示在影片下方。' });
+  check();
+  const state = await setState({ running: true, tabId: tab.id, language, size, source: selected.source, sessionId,
+    message: selected.source === 'caption' ? 'YouTube 字幕 → AI 翻譯' : '分頁音訊 → ASR → AI 翻譯' });
+  if (selected.source === 'caption') {
+    const ack = await chrome.tabs.sendMessage(tab.id, { type: 'AI_CAPTION_START', sessionId, videoId: selected.videoId });
+    if (!ack?.ok) throw new Error('無法讀取影片播放位置，請重新開始。');
+  }
+  return state;
+  } catch (error) {
+    if (run === operation) {
+      if (tab?.id) await sendToTab(tab.id, { type: 'AI_TRANSLATOR_HIDE' });
+      await stopTranslation(error.message);
+    }
+    throw error;
+  } finally { starting = false; }
 }
 
 async function stopTranslation(message = '已停止翻譯。') {
+  operation++;
   const state = await getState();
+  if (state.tabId) await sendToTab(state.tabId, { type: 'AI_CAPTION_STOP' });
   if (state.tabId) await sendToTab(state.tabId, { type: 'AI_TRANSLATOR_HIDE' });
   try { await chrome.runtime.sendMessage({ target: 'offscreen', type: 'STOP_CAPTURE' }); } catch {}
   try {
@@ -200,14 +239,33 @@ async function publicState(message, error = false) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id) return false;
   if (message?.target === 'offscreen') return false;
+  if (sender.tab) {
+    if (!['CAPTION_TICK', 'CAPTION_VIDEO_CHANGED', 'CAPTION_UNAVAILABLE'].includes(message?.type)) return false;
+    (async () => {
+      const state = await getState();
+      if (!state.running || state.source !== 'caption' || state.tabId !== sender.tab.id || state.sessionId !== message.sessionId) return;
+      if (message.type === 'CAPTION_TICK') {
+        if (!Number.isFinite(message.time) || message.time < 0) return;
+        await chrome.runtime.sendMessage({ target: 'offscreen', type: 'CAPTION_TICK', sessionId: state.sessionId,
+          time: message.time, paused: !!message.paused, seeking: !!message.seeking });
+      } else {
+        await stopTranslation('影片已變更，重新判斷字幕來源…');
+        await startTranslation(state.language, state.size, state.tabId, message.type === 'CAPTION_UNAVAILABLE');
+      }
+    })().catch(error => stopTranslation(error.message));
+    return false;
+  }
 
   if (message?.type === 'OFFSCREEN_SUBTITLE') {
+    if (sender.url !== chrome.runtime.getURL(OFFSCREEN_URL)) return false;
     const { tabId, original, translated, pending } = message;
     sendToTab(tabId, { type: 'AI_TRANSLATOR_SUBTITLE', original, translated, pending });
     return false;
   }
   if (message?.type === 'OFFSCREEN_ERROR') {
+    if (sender.url !== chrome.runtime.getURL(OFFSCREEN_URL)) return false;
     (async () => {
       const state = await getState();
       if (state.tabId) await sendToTab(state.tabId, { type: 'AI_TRANSLATOR_ERROR', message: message.error });

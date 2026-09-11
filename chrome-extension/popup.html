@@ -13,7 +13,7 @@
         <h1>AI 即時翻譯</h1>
         <p>目前分頁 → 繁中字幕</p>
       </div>
-      <span class="version">V0.1.3</span>
+      <span class="version">V0.2.0</span>
     </header>
 
     <section id="account-card" class="card">
@@ -42,9 +42,10 @@
       </label>
     </section>
 
+    <p id="source" class="hint" aria-live="polite"></p>
     <p id="status" class="status">準備就緒</p>
     <button id="toggle" class="primary">開始翻譯目前分頁</button>
-    <p class="hint">支援 YouTube 與一般網頁影片。翻譯時會直接擷取這個分頁的音訊，不使用電腦麥克風。</p>
+    <p class="hint">YouTube 優先使用影片字幕；無可用字幕時自動擷取分頁音訊，不使用電腦麥克風。</p>
   </main>
   <script type="module" src="popup.js"></script>
 </body>

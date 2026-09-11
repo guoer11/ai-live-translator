@@ -1,4 +1,5 @@
 const $ = id => document.getElementById(id);
+document.querySelector('.version').textContent = `V${chrome.runtime.getManifest().version}`;
 let running = false;
 let signedIn = false;
 
@@ -10,6 +11,7 @@ function setStatus(text, error = false) {
 function render(state = {}) {
   running = !!state.running;
   signedIn = !!state.email;
+  $('source').textContent = state.running ? (state.source === 'caption' ? '字幕模式' : '音訊模式') : '';
   $('account').textContent = state.email || '尚未登入';
   $('login').hidden = signedIn;
   $('logout').hidden = !signedIn;
@@ -45,7 +47,7 @@ $('logout').addEventListener('click', async () => {
 
 $('toggle').addEventListener('click', async () => {
   $('toggle').disabled = true;
-  setStatus(running ? '正在停止…' : '正在擷取目前分頁音訊…');
+  setStatus(running ? '正在停止…' : '正在判斷字幕來源並連線…');
   try {
     const type = running ? 'STOP_TRANSLATION' : 'START_TRANSLATION';
     const response = await send({ type, language: $('language').value, size: $('size').value });
@@ -68,3 +70,7 @@ for (const id of ['language', 'size']) {
   try { render((await send({ type: 'GET_STATUS' })).state); }
   catch (error) { setStatus(error.message, true); }
 })();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'session' && changes.translator_extension_state_v1)
+    send({ type: 'GET_STATUS' }).then(r => render(r.state)).catch(() => {});
+});
