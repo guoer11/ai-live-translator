@@ -5,6 +5,7 @@
   const HOST_ID = '__ai_live_translate_overlay__';
   const NATIVE_CAPTION_STYLE_ID = '__ai_live_translate_hide_native_captions__';
   let captionMode = false;
+  let captionDisplay = 'translated';
   let host = document.getElementById(HOST_ID);
 
   if (!host) {
@@ -31,16 +32,20 @@
         .pending .translated{opacity:.9}
         .error{background:rgba(126,24,20,.82)}
 
-        /* Caption mode visually replaces YouTube's own subtitle line. The original
-           Japanese/English cue stays available to the translator but is not duplicated. */
+        /* Caption mode visually replaces YouTube's own subtitle line. The native
+           caption DOM stays alive for capture, while this overlay can show either
+           Traditional Chinese only or source + Traditional Chinese. */
         .caption-mode{background:transparent;border:0;border-radius:0;padding:0;box-shadow:none;backdrop-filter:none;line-height:1.35}
         .caption-mode .original{display:none}
-        .caption-mode .translated{display:inline;padding:2px 9px 4px;background:rgba(8,8,8,.72);border-radius:2px;font-size:28px;font-weight:650;line-height:1.35;-webkit-box-decoration-break:clone;box-decoration-break:clone;text-shadow:0 1px 4px rgba(0,0,0,1),0 0 2px rgba(0,0,0,.95)}
+        .caption-mode .translated{display:table;margin:0 auto;padding:2px 9px 4px;background:rgba(8,8,8,.72);border-radius:2px;font-size:28px;font-weight:650;line-height:1.35;-webkit-box-decoration-break:clone;box-decoration-break:clone;text-shadow:0 1px 4px rgba(0,0,0,1),0 0 2px rgba(0,0,0,.95)}
+        .caption-mode.bilingual .original{display:table;margin:0 auto 3px;padding:1px 7px 2px;min-height:0;background:rgba(8,8,8,.58);border-radius:2px;color:rgba(255,255,255,.9);font-size:16px;font-weight:500;line-height:1.3}
         .caption-mode.small .translated{font-size:22px}
+        .caption-mode.small.bilingual .original{font-size:13px}
         .caption-mode.large .translated{font-size:34px}
+        .caption-mode.large.bilingual .original{font-size:19px}
         .caption-mode.error{background:transparent}
         .caption-mode.error .translated{background:rgba(126,24,20,.86)}
-        @media(max-width:700px){.translated{font-size:25px}.large .translated{font-size:31px}.caption-mode .translated{font-size:22px}.caption-mode.large .translated{font-size:27px}}
+        @media(max-width:700px){.translated{font-size:25px}.large .translated{font-size:31px}.caption-mode .translated{font-size:22px}.caption-mode.large .translated{font-size:27px}.caption-mode.bilingual .original{font-size:13px}}
       </style>
       <div class="box medium">
         <p class="original"></p>
@@ -99,6 +104,7 @@
   function setDisplayMode(source) {
     captionMode = source === 'caption' && /(^|\.)youtube\.com$/.test(location.hostname);
     box.classList.toggle('caption-mode', captionMode);
+    box.classList.toggle('bilingual', captionMode && captionDisplay === 'bilingual');
     if (captionMode) {
       hideNativeYouTubeCaptions();
       applyCaptionLayout();
@@ -122,8 +128,9 @@
     if (!message?.type?.startsWith('AI_TRANSLATOR_')) return;
 
     if (message.type === 'AI_TRANSLATOR_SHOW') {
-      box.classList.remove('small', 'medium', 'large', 'pending', 'error');
+      box.classList.remove('small', 'medium', 'large', 'pending', 'error', 'caption-mode', 'bilingual');
       box.classList.add(message.size || 'medium');
+      captionDisplay = message.captionDisplay === 'bilingual' ? 'bilingual' : 'translated';
       setDisplayMode(message.source);
       original.textContent = '';
       translated.textContent = captionMode ? '正在連接字幕翻譯…' : '正在連接 AI 即時翻譯…';
@@ -135,7 +142,8 @@
     if (message.type === 'AI_TRANSLATOR_HIDE') {
       host.style.display = 'none';
       captionMode = false;
-      box.classList.remove('caption-mode');
+      captionDisplay = 'translated';
+      box.classList.remove('caption-mode', 'bilingual');
       restoreNativeYouTubeCaptions();
       applyAudioLayout();
       return;
