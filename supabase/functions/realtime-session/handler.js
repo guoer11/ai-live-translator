@@ -79,11 +79,14 @@ export function createHandler({ env, fetcher = fetch }) {
   return async request => {
     const origin = request.headers.get('origin') || '';
     const allowed = (env('ALLOWED_ORIGINS') || '').split(',').map(x => x.trim()).filter(Boolean);
-    const originAllowed = allowed.includes(origin) || TRUSTED_EXTENSION_ORIGINS.has(origin);
+    // Chrome extension service workers can omit Origin (or send null) on
+    // extension-initiated fetches. Authorization is still enforced below by
+    // Supabase JWT, verified Google identity, and the family allow-list.
+    const originAllowed = allowed.includes(origin) || TRUSTED_EXTENSION_ORIGINS.has(origin) || origin === '' || origin === 'null';
     const headers = { 'Cache-Control': 'no-store', 'Vary': 'Origin', 'X-Content-Type-Options': 'nosniff' };
     const json = (status, error) => new Response(JSON.stringify({ error }), { status, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' } });
     if (!originAllowed) return json(403, '這個網站尚未獲准使用翻譯服務。');
-    headers['Access-Control-Allow-Origin'] = origin;
+    if (origin) headers['Access-Control-Allow-Origin'] = origin;
     headers['Access-Control-Allow-Headers'] = 'content-type, authorization, apikey';
     headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
