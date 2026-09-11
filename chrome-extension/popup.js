@@ -8,10 +8,16 @@ function setStatus(text, error = false) {
   $('status').classList.toggle('error', error);
 }
 
+function sourceLabel(state = {}) {
+  if (!state.running) return '';
+  if (state.source === 'caption') return state.captionKind === 'automatic' ? '來源：自動字幕' : '來源：官方字幕';
+  return '來源：音訊備援';
+}
+
 function render(state = {}) {
   running = !!state.running;
   signedIn = !!state.email;
-  $('source').textContent = state.running ? (state.source === 'caption' ? '字幕模式' : '音訊模式') : '';
+  $('source').textContent = sourceLabel(state);
   $('account').textContent = state.email || '尚未登入';
   $('login').hidden = signedIn;
   $('logout').hidden = !signedIn;
