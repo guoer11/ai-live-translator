@@ -4,14 +4,26 @@ const HISTORY_KEY = 'translator.history.v1';
 const LABELS = { en: 'English', ja: '日本語', ko: '한국어' };
 const $ = id => document.getElementById(id);
 
+function latestDomItem() {
+  const rows = [...document.querySelectorAll('#history li')];
+  const row = rows.reverse().find(item => item.querySelector('.original')?.textContent?.trim() || item.querySelector('.translated')?.textContent?.trim());
+  if (!row) return null;
+  return {
+    original: row.querySelector('.original')?.textContent || '',
+    translated: row.querySelector('.translated')?.textContent || '',
+    status: row.dataset.status || 'done',
+  };
+}
+
 function latestHistoryItem() {
   try {
     const items = JSON.parse(sessionStorage.getItem(HISTORY_KEY) || '[]');
-    if (!Array.isArray(items)) return null;
-    return [...items].reverse().find(item => item && (String(item.original || '').trim() || String(item.translated || '').trim())) || null;
-  } catch {
-    return null;
-  }
+    if (Array.isArray(items)) {
+      const item = [...items].reverse().find(value => value && (String(value.original || '').trim() || String(value.translated || '').trim()));
+      if (item) return item;
+    }
+  } catch { /* Fall back to the rendered history below. */ }
+  return latestDomItem();
 }
 
 export function splitFaceTexts(row, pair = 'en') {
@@ -64,7 +76,7 @@ function initFaceDisplay() {
   const language = $('language');
   if (!toggle || !history || !language) return;
 
-  toggle.addEventListener('click', () => setFaceMode(!$('face-panel').hidden));
+  toggle.addEventListener('click', () => setFaceMode($('face-panel').hidden));
   language.addEventListener('change', refreshFace);
   new MutationObserver(refreshFace).observe(history, { childList: true, subtree: true, characterData: true });
   refreshFace();
