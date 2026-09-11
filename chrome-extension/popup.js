@@ -29,7 +29,10 @@ function render(state = {}) {
   if (state.language) $('language').value = state.language;
   if (state.size) $('size').value = state.size;
   if (state.message) setStatus(state.message, !!state.error);
-  else setStatus(running ? '翻譯中，字幕會顯示在影片下方。' : '準備就緒');
+  else if (running) setStatus(state.source === 'caption'
+    ? '翻譯中，繁中會顯示在 YouTube 原字幕位置。'
+    : '翻譯中，字幕會顯示在影片下方。');
+  else setStatus('準備就緒');
 }
 
 async function send(message) {
