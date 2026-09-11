@@ -6,12 +6,16 @@ export class RealtimeTranslator {
     this.closed = false; this.queue = []; this.active = null; this.responses = new Map();
     this.seen = new Set(); this.abort = new AbortController();
     this.turns = new Map();
+    this.audioSender = null; this.audioTrack = null; this.inputPaused = false;
+  }
+  microphoneConstraints() {
+    return { audio: { channelCount: { ideal: 1 }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false };
   }
   async start() {
     if (!globalThis.isSecureContext) throw new Error('請使用 HTTPS 網址開啟翻譯。');
     if (!navigator.mediaDevices?.getUserMedia || !globalThis.RTCPeerConnection) throw new Error('這個瀏覽器不支援麥克風即時翻譯，請改用 Safari。');
     this.onState('connecting');
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: { ideal: 1 }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+    const stream = await navigator.mediaDevices.getUserMedia(this.microphoneConstraints());
     if (this.closed) { stream.getTracks().forEach(t => t.stop()); return; }
     this.stream = stream;
     const audioTracks = stream.getAudioTracks();
@@ -20,7 +24,8 @@ export class RealtimeTranslator {
     }
     this.pc = new RTCPeerConnection();
     for (const track of audioTracks) {
-      this.pc.addTrack(track, stream);
+      this.audioSender = this.pc.addTrack(track, stream);
+      this.audioTrack = track;
       this.watchAudioTrack(track);
     }
     this.dc = this.pc.createDataChannel('oai-events');
@@ -73,6 +78,48 @@ export class RealtimeTranslator {
     this.limitTimer = setTimeout(() => this.fail('本次翻譯已滿 10 分鐘，已停止收音；可以再次開始。'), 10 * 60000);
   }
   send(event) { if (!this.closed && this.dc?.readyState === 'open') this.dc.send(JSON.stringify(event)); }
+  async pauseInput() {
+    if (this.closed || this.inputPaused) return;
+    const track = this.audioTrack;
+    if (!track || !this.audioSender) throw new Error('麥克風連線狀態異常，請重新開始翻譯。');
+    this.inputPaused = true;
+    // Stop carrying microphone audio immediately. Keep a short silent tail so
+    // server VAD can finish the last spoken turn before the sender is detached.
+    track.enabled = false;
+    await new Promise(resolve => setTimeout(resolve, 1400));
+    if (this.closed) return;
+    try {
+      await this.audioSender.replaceTrack(null);
+    } catch (error) {
+      if (!this.closed) { track.enabled = true; this.inputPaused = false; }
+      throw error;
+    }
+  }
+  async resumeInput() {
+    if (this.closed) throw new Error('翻譯連線已關閉，請重新開始。');
+    if (!this.inputPaused) return;
+    let track = this.audioTrack;
+    let newStream = null;
+    if (!track || track.readyState === 'ended') {
+      newStream = await navigator.mediaDevices.getUserMedia(this.microphoneConstraints());
+      if (this.closed) { newStream.getTracks().forEach(t => t.stop()); return; }
+      track = newStream.getAudioTracks()[0];
+      if (!track || track.readyState === 'ended') {
+        newStream.getTracks().forEach(t => t.stop());
+        throw new Error('麥克風沒有可用的音訊，請重新開始翻譯。');
+      }
+      this.stream?.getTracks().forEach(t => { t.onended = null; t.onmute = null; t.onunmute = null; t.stop(); });
+      this.stream = newStream; this.audioTrack = track; this.watchAudioTrack(track);
+    }
+    try {
+      await this.audioSender.replaceTrack(track);
+      track.enabled = true;
+      this.inputPaused = false;
+    } catch (error) {
+      if (newStream) newStream.getTracks().forEach(t => t.stop());
+      throw error;
+    }
+  }
   watchAudioTrack(track) {
     // A live WebRTC connection does not mean the capture source is supplying audio.
     // Tolerate a brief route change, but never silently keep a muted session alive.
@@ -155,7 +202,7 @@ export class RealtimeTranslator {
     if (this.closed || this.active) return;
     while (this.queue.length && this.turns.get(this.queue[0])?.state === 'failed') this.queue.shift();
     const id = this.queue[0];
-    if (!id) { this.onState('listening'); return; }
+    if (!id) { this.onState(this.inputPaused ? 'standby' : 'listening'); return; }
     const turn = this.turns.get(id);
     if (turn.state !== 'ready') return;
     this.queue.shift(); turn.state = 'translating';
@@ -174,6 +221,7 @@ export class RealtimeTranslator {
     this.closed = true; this.abort.abort(); this.readyReject?.(new Error('已停止連線'));
     for (const timer of [this.limitTimer, this.connectTimer, this.responseTimer, this.disconnectTimer, this.muteTimer]) clearTimeout(timer);
     this.dc?.close(); this.pc?.close(); this.stream?.getTracks().forEach(t => { t.onended = null; t.onmute = null; t.onunmute = null; t.stop(); });
+    this.audioTrack = null; this.audioSender = null; this.inputPaused = false;
     this.queue = []; this.responses.clear(); this.seen.clear();
     for (const turn of this.turns.values()) clearTimeout(turn.timer);
     this.turns.clear();
