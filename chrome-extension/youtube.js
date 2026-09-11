@@ -44,7 +44,7 @@ export async function chooseSource(tab, language, executeScript, parse) {
     const [result] = await executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: probeYouTubeCaptions, args: [language] });
     const data = result?.result;
     const cues = parse(data?.payload);
-    if (data?.videoId && cues.length) return { source: 'caption', videoId: data.videoId, cues };
+    if (data?.videoId && cues.length) return { source: 'caption', captionKind: data.kind === 'automatic' ? 'automatic' : 'manual', videoId: data.videoId, cues };
   } catch { /* A probe failure does not disable translation. */ }
   return { source: 'tab' };
 }
