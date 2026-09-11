@@ -20,13 +20,13 @@
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `
       <style>
-        .box{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans-serif;background:rgba(8,12,18,.82);color:#fff;border-radius:16px;padding:12px 18px 14px;box-shadow:0 6px 28px rgba(0,0,0,.28);backdrop-filter:blur(7px);text-align:center;line-height:1.45;text-wrap:balance}
-        .original{font-size:16px;color:rgba(255,255,255,.72);margin:0 0 4px;min-height:1.2em}
-        .translated{font-size:30px;font-weight:700;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+        .box{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans-serif;background:rgba(8,12,18,.34);color:#fff;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:8px 16px 10px;box-shadow:0 3px 16px rgba(0,0,0,.18);backdrop-filter:blur(2px);text-align:center;line-height:1.4;text-wrap:balance}
+        .original{font-size:16px;color:rgba(255,255,255,.82);margin:0 0 3px;min-height:1.2em;text-shadow:0 1px 4px rgba(0,0,0,.95),0 0 2px rgba(0,0,0,.9)}
+        .translated{font-size:30px;font-weight:700;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;text-shadow:0 2px 6px rgba(0,0,0,1),0 0 3px rgba(0,0,0,.95)}
         .small .original{font-size:13px}.small .translated{font-size:24px}
         .large .original{font-size:19px}.large .translated{font-size:38px}
-        .pending .translated{opacity:.86}
-        .error{background:rgba(126,24,20,.9)}
+        .pending .translated{opacity:.9}
+        .error{background:rgba(126,24,20,.82)}
         @media(max-width:700px){.translated{font-size:25px}.large .translated{font-size:31px}}
       </style>
       <div class="box medium">
