@@ -109,17 +109,6 @@ async function createRealtimeCall(fetcher, apiKey, sdp, session) {
   });
 }
 
-async function upstreamDetail(response) {
-  const raw = await response.text().catch(() => '');
-  try {
-    const data = JSON.parse(raw);
-    const detail = data?.error?.message || data?.error?.code || data?.error?.type || '';
-    return String(detail || '').replace(/\s+/g, ' ').slice(0, 280);
-  } catch {
-    return raw.replace(/\s+/g, ' ').slice(0, 280);
-  }
-}
-
 export function createHandler({ env, fetcher = fetch }) {
   return async request => {
     const origin = request.headers.get('origin') || '';
@@ -196,9 +185,8 @@ export function createHandler({ env, fetcher = fetch }) {
       }
 
       if (!response.ok) {
-        const detail = await upstreamDetail(response);
         if (response.status === 429) return json(429, '翻譯服務額度或流量已達限制，請稍後再試。');
-        return json(502, detail ? `OpenAI 建立連線失敗（${response.status}）：${detail}` : `OpenAI 建立連線失敗（${response.status}）。`);
+        return json(502, `OpenAI 建立連線失敗（${response.status}）。`);
       }
 
       const answer = await response.text();
