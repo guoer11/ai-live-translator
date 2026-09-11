@@ -119,7 +119,6 @@ test('all language pairs use server-controlled text sessions; secrets never retu
     const h = handler(async (url, init) => {
       calls.push({ url, init });
       if (calls.length === 1) return Response.json(true);
-      if (url.includes('/rest/v1/translator_glossary')) return Response.json([{ source_text: 'ポケパッド', target_text: '寶可平板' }]);
       const config = JSON.parse(init.body.get('session'));
       assert.deepEqual(config.output_modalities, ['text']);
       assert.equal(config.audio.input.transcription.model, 'gpt-live-transcribe');
@@ -137,7 +136,7 @@ test('all language pairs use server-controlled text sessions; secrets never retu
     });
     const r = await h(request({ language, sdp: 'v=0\r\noffer' }));
     assert.equal(r.status, 200); assert.equal(await r.text(), 'v=0\r\nanswer');
-    assert.equal(r.headers.get('cache-control'), 'no-store'); assert.equal(calls.length, 3);
+    assert.equal(r.headers.get('cache-control'), 'no-store'); assert.equal(calls.length, 2);
   }
 });
 test('upstream errors are sanitized and no key config fails closed', async () => {
