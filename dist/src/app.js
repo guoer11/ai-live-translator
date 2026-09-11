@@ -22,6 +22,8 @@ $('font-size').value = prefs.large ? 'large' : 'normal';
 document.body.classList.toggle('large', !!prefs.large);
 let client = null, started = 0, wakeLock = null, demoMode = false;
 let account = null, authRevision = 0, starting = false;
+let standby = false, standbyTimer = null;
+const STANDBY_MS = 30000;
 function lock(message = '請使用家庭 Google 帳號登入。') {
   account = null; stop(); history.clear(); render();
   $('settings').close(); document.querySelector('.app').hidden = true;
@@ -62,8 +64,8 @@ function reloadForUpdate() {
   window.location.reload();
 }
 function state(value) {
-  $('status').textContent = { connecting: '正在連線…', listening: '收音中', translating: '正在翻譯…', stopped: '已停止', demo: '字幕示範 · 非即時翻譯' }[value] || '尚未開始';
-  $('empty-title').textContent = { connecting: '正在連線…', listening: '聽取中…', translating: '正在翻譯…' }[value] || '準備好，就開始說話';
+  $('status').textContent = { connecting: '正在連線…', listening: '收音中', translating: '正在翻譯…', standby: '待機中', stopped: '已停止', demo: '字幕示範 · 非即時翻譯' }[value] || '尚未開始';
+  $('empty-title').textContent = { connecting: '正在連線…', listening: '聽取中…', translating: '正在翻譯…', standby: '待機中，30 秒內可快速繼續' }[value] || '準備好，就開始說話';
 }
 function controls(active) {
   $('language').disabled = active; $('demo').disabled = active; $('settings-button').disabled = active; $('clear').disabled = active;
@@ -118,15 +120,60 @@ function onEvent(e) {
   render();
 }
 function stop(message = '') {
+  clearTimeout(standbyTimer); standbyTimer = null; standby = false;
   const old = client; client = null; old?.stop();
   wakeLock?.release().catch(() => {}); wakeLock = null;
   history.items.forEach(x => { if (x.status === 'pending') x.status = 'interrupted'; });
   history.save(); controls(false); state('stopped'); if (message) notice(message); render();
   if (updateReady) setTimeout(reloadForUpdate, 0);
 }
+function microphoneError(error, fallback = '連線失敗，請稍後再試。') {
+  const messages = { NotAllowedError: '無法使用麥克風，請在 Safari 的網站設定允許麥克風後重試。', NotFoundError: '找不到麥克風，請確認裝置或耳機已連接。', NotReadableError: '麥克風目前無法使用，請關閉其他收音程式後重試。', AbortError: '連線已取消。' };
+  return messages[error?.name] || error?.message || fallback;
+}
+async function enterStandby() {
+  if (!client || standby) return;
+  const session = client;
+  standby = true; controls(false); state('standby');
+  notice('已停止傳送音訊；30 秒內再按麥克風可快速繼續。');
+  wakeLock?.release().catch(() => {}); wakeLock = null;
+  try {
+    await session.pauseInput();
+  } catch (error) {
+    if (client === session) stop(microphoneError(error, '無法進入待機，翻譯連線已關閉。'));
+    return;
+  }
+  if (client !== session || !standby) return;
+  if (updateReady) { stop(); return; }
+  standbyTimer = setTimeout(() => {
+    if (client === session && standby) stop('快速待機已結束；下次按麥克風會重新連線。');
+  }, STANDBY_MS);
+}
+async function resumeStandby() {
+  if (!client || !standby) return;
+  if (!navigator.onLine) { stop('目前沒有網路，連線後再開始翻譯。'); return; }
+  const session = client;
+  clearTimeout(standbyTimer); standbyTimer = null; standby = false;
+  notice(); controls(true); state('connecting');
+  try {
+    await session.resumeInput();
+    if (client !== session) return;
+    state('listening');
+    if (navigator.wakeLock) {
+      try { const lock = await navigator.wakeLock.request('screen'); if (client === session && !standby) wakeLock = lock; else await lock.release(); } catch {}
+    }
+  } catch (error) {
+    if (client === session) stop(microphoneError(error, '快速恢復失敗，請再按一次麥克風重新連線。'));
+  }
+}
 $('start').onclick = async () => {
-  if (client) { stop(); return; }
   if (starting) return;
+  if (client) {
+    starting = true;
+    try { if (standby) await resumeStandby(); else await enterStandby(); }
+    finally { starting = false; }
+    return;
+  }
   if (!navigator.onLine) { notice('目前沒有網路，連線後才能開始翻譯。'); return; }
   if (!config.sessionEndpoint) { notice('即時翻譯尚未啟用：管理者完成後端連線設定後即可使用。你可以先查看字幕示範。'); return; }
   starting = true;
@@ -134,8 +181,7 @@ $('start').onclick = async () => {
   const revision = authRevision;
   try { verified = await authorize(); }
   catch (error) { lock(error.message); return; }
-  finally { starting = false; }
-  if (!account || revision !== authRevision || verified.userId !== account.userId || document.hidden) return;
+  if (!account || revision !== authRevision || verified.userId !== account.userId || document.hidden) { starting = false; return; }
   if (demoMode) { history.items = history.items.filter(x => !x.demo); demoMode = false; }
   notice(); controls(true); started = Date.now(); $('elapsed').textContent = '00:00';
   const session = new RealtimeTranslator({ endpoint: config.sessionEndpoint, language: $('language').value, accessToken: verified.token,
@@ -147,13 +193,11 @@ $('start').onclick = async () => {
   try {
     await session.start();
     if (client === session && navigator.wakeLock) {
-      try { const lock = await navigator.wakeLock.request('screen'); if (client === session) wakeLock = lock; else await lock.release(); } catch {}
+      try { const lock = await navigator.wakeLock.request('screen'); if (client === session && !standby) wakeLock = lock; else await lock.release(); } catch {}
     }
   } catch (error) {
-    if (client !== session) return;
-    const messages = { NotAllowedError: '無法使用麥克風，請在 Safari 的網站設定允許麥克風後重試。', NotFoundError: '找不到麥克風，請確認裝置或耳機已連接。', NotReadableError: '麥克風目前無法使用，請關閉其他收音程式後重試。', AbortError: '連線已取消。' };
-    stop(messages[error.name] || error.message || '連線失敗，請稍後再試。');
-  }
+    if (client === session) stop(microphoneError(error));
+  } finally { starting = false; }
 };
 $('settings-button').onclick = () => $('settings').showModal();
 $('close-settings').onclick = () => $('settings').close();
@@ -163,9 +207,13 @@ $('settings-form').onsubmit = e => {
   savePreferences(); render(); $('settings').close();
 };
 function savePreferences() { try { localStorage.setItem('translator.preferences', JSON.stringify({ language: $('language').value, retention: history.minutes, large: document.body.classList.contains('large') })); } catch {} }
-$('language').onchange = () => { savePreferences(); if (demoMode) { history.items = history.items.filter(x => !x.demo); history.save(); demoMode = false; state('stopped'); render(); } };
-$('clear').onclick = () => { history.clear(); demoMode = false; state('stopped'); render(); };
+$('language').onchange = () => {
+  if (standby && client) stop('翻譯語言已變更，下次開始會使用新語言。');
+  savePreferences(); if (demoMode) { history.items = history.items.filter(x => !x.demo); history.save(); demoMode = false; state('stopped'); render(); }
+};
+$('clear').onclick = () => { history.clear(); demoMode = false; state(standby ? 'standby' : 'stopped'); render(); };
 $('demo').onclick = () => {
+  if (client) stop();
   $('settings').close();
   const text = { en: ['Excuse me, how do I get to the station?', '不好意思，請問車站怎麼走？'], ja: ['すみません、駅はどこですか？', '不好意思，請問車站在哪裡？'], ko: ['실례합니다. 역이 어디에 있나요?', '不好意思，請問車站在哪裡？'] }[$('language').value];
   history.items = history.items.filter(x => !x.demo);
@@ -177,7 +225,7 @@ setInterval(() => {
   const count = history.items.length; history.prune(); if (count !== history.items.length) render();
   if (client) { const seconds = Math.floor((Date.now() - started) / 1000); $('elapsed').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; }
 }, 1000);
-document.addEventListener('visibilitychange', () => { if (document.hidden && client) stop('已切換到背景，為避免持續收音已停止翻譯。'); if (!document.hidden) render(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && client) stop('已切換到背景，為避免持續連線已停止翻譯。'); if (!document.hidden) render(); });
 window.addEventListener('pagehide', () => { if (client) stop(); });
 window.addEventListener('offline', () => { if (client) stop('網路已中斷，已停止收音。'); else notice('目前離線，可以查看尚未到期的字幕。'); });
 window.addEventListener('online', () => notice('網路已恢復，可以開始翻譯。'));
