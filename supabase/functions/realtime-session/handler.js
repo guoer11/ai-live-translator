@@ -1,4 +1,5 @@
 const LANGUAGES = { en: 'natural American English', ja: 'natural Japanese', ko: 'natural Korean' };
+const TRUSTED_EXTENSION_ORIGINS = new Set(['chrome-extension://mdbnahpneomonfndhcnkeeldjbebkfhj']);
 export function sessionConfig(language, model) {
   return {
     type: 'realtime', model, output_modalities: ['text'], max_output_tokens: 1024,
@@ -39,9 +40,10 @@ export function createHandler({ env, fetcher = fetch }) {
   return async request => {
     const origin = request.headers.get('origin') || '';
     const allowed = (env('ALLOWED_ORIGINS') || '').split(',').map(x => x.trim()).filter(Boolean);
+    const originAllowed = allowed.includes(origin) || TRUSTED_EXTENSION_ORIGINS.has(origin);
     const headers = { 'Cache-Control': 'no-store', 'Vary': 'Origin', 'X-Content-Type-Options': 'nosniff' };
     const json = (status, error) => new Response(JSON.stringify({ error }), { status, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' } });
-    if (!allowed.includes(origin)) return json(403, '這個網站尚未獲准使用翻譯服務。');
+    if (!originAllowed) return json(403, '這個網站尚未獲准使用翻譯服務。');
     headers['Access-Control-Allow-Origin'] = origin;
     headers['Access-Control-Allow-Headers'] = 'content-type, authorization, apikey';
     headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
