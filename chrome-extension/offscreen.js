@@ -19,6 +19,10 @@ let responseTimer = null;
 let audioDetected = false;
 let transcriptDetected = false;
 let lastCompleted = { original: '', translated: '' };
+let contextHistory = [];
+let quickPending = null;
+let quickActive = null;
+let quickSerial = 0;
 
 function sendRuntime(message) {
   chrome.runtime.sendMessage(message).catch(() => {});
@@ -42,8 +46,40 @@ function send(event) {
 
 function reserve(id) {
   if (!id || turns.has(id)) return;
-  turns.set(id, { id, state: 'waiting', original: '', partial: '', translated: '' });
+  turns.set(id, {
+    id,
+    state: 'waiting',
+    original: '',
+    partial: '',
+    translated: '',
+    quickRevision: 0,
+    quickDisplayedRevision: 0,
+    lastQuickText: '',
+    lastQuickAt: 0,
+    previewTranslation: '',
+    finalDone: false,
+  });
   queue.push(id);
+}
+
+function rememberContext(original, translated) {
+  original = String(original || '').trim();
+  translated = String(translated || '').trim();
+  if (!original || !translated) return;
+  const previous = contextHistory.at(-1);
+  if (previous?.original === original && previous?.translated === translated) return;
+  contextHistory.push({ original, translated });
+  if (contextHistory.length > 2) contextHistory = contextHistory.slice(-2);
+  lastCompleted = { original, translated };
+}
+
+function translationInput(current) {
+  current = String(current || '').trim();
+  if (!current || !contextHistory.length) return current;
+  const context = contextHistory.map((item, index) =>
+    `Previous ${index + 1} source: ${item.original}\nPrevious ${index + 1} zh-TW: ${item.translated}`
+  ).join('\n');
+  return `CONTEXT ONLY — use this only to understand references; do not translate or repeat it:\n${context}\n\nCURRENT SOURCE — translate only this text:\n${current}`;
 }
 
 function startAudioMonitor(source) {
@@ -73,6 +109,88 @@ function startAudioMonitor(source) {
   }, 300);
 }
 
+function shouldQuickTranslate(turn, text) {
+  if (sourceMode !== 'tab' || turn.finalDone || text.length < 10 || text === turn.lastQuickText) return false;
+  const growth = text.length - turn.lastQuickText.length;
+  const ended = /[。！？!?]$/.test(text);
+  if (ended && growth > 0) return true;
+  return growth >= 14 && Date.now() - turn.lastQuickAt >= 650;
+}
+
+function queueQuickTranslation(turn, text) {
+  if (!shouldQuickTranslate(turn, text)) return;
+  turn.quickRevision += 1;
+  turn.lastQuickText = text;
+  turn.lastQuickAt = Date.now();
+  quickPending = {
+    key: `quick:${++quickSerial}`,
+    id: turn.id,
+    revision: turn.quickRevision,
+    text,
+    translated: '',
+    responseId: null,
+    started: Date.now(),
+  };
+  pumpQuickTranslation();
+}
+
+function pumpQuickTranslation() {
+  if (closed || quickActive || !quickPending) return;
+  quickActive = quickPending;
+  quickPending = null;
+  send({
+    type: 'response.create',
+    response: {
+      conversation: 'none',
+      metadata: { quick_job: quickActive.key },
+      output_modalities: ['text'],
+      max_output_tokens: 192,
+      input: [{
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: translationInput(quickActive.text) }],
+      }],
+    },
+  });
+}
+
+function handleQuickEvent(event) {
+  if (!quickActive) return false;
+  const metadataKey = event.response?.metadata?.quick_job;
+  const responseId = event.response_id || event.response?.id;
+  if (event.type === 'response.created' && metadataKey === quickActive.key) {
+    quickActive.responseId = event.response?.id || null;
+    return true;
+  }
+  if (metadataKey !== quickActive.key && (!quickActive.responseId || responseId !== quickActive.responseId)) return false;
+
+  const turn = turns.get(quickActive.id);
+  if (event.type === 'response.output_text.delta') quickActive.translated += event.delta || '';
+  if (event.type === 'response.output_text.done') quickActive.translated = String(event.text || quickActive.translated || '');
+  if (event.type === 'response.done') {
+    const text = (event.response?.output || [])
+      .flatMap(x => x.content || [])
+      .filter(x => x.type === 'output_text')
+      .map(x => x.text || '')
+      .join('\n')
+      .trim();
+    if (text) quickActive.translated = text;
+  }
+
+  if (turn && !turn.finalDone && quickActive.revision >= turn.quickDisplayedRevision && quickActive.translated.trim()
+    && ['response.output_text.delta', 'response.output_text.done', 'response.done'].includes(event.type)) {
+    turn.quickDisplayedRevision = quickActive.revision;
+    turn.previewTranslation = quickActive.translated.trim();
+    publish(quickActive.text, turn.previewTranslation, true);
+  }
+
+  if (event.type === 'response.done') {
+    quickActive = null;
+    pumpQuickTranslation();
+  }
+  return true;
+}
+
 function translateNext() {
   if (closed || activeTurn) return;
   while (queue.length && turns.get(queue[0])?.state === 'failed') queue.shift();
@@ -90,10 +208,11 @@ function translateNext() {
       conversation: 'none',
       metadata: { input_item_id: id },
       output_modalities: ['text'],
+      max_output_tokens: 256,
       input: [{
         type: 'message',
         role: 'user',
-        content: [{ type: 'input_text', text: turn.original }],
+        content: [{ type: 'input_text', text: translationInput(turn.original) }],
       }],
     },
   });
@@ -110,6 +229,8 @@ function handleEvent(event) {
     return;
   }
 
+  if (handleQuickEvent(event)) return;
+
   if (event.type === 'input_audio_buffer.speech_started') {
     if (!lastCompleted.translated && !transcriptDetected) publish('', '偵測到語音，正在辨識…', true);
     return;
@@ -124,7 +245,10 @@ function handleEvent(event) {
     transcriptDetected = true;
     turn.partial += event.delta || '';
     const partial = turn.partial.trim();
-    if (partial) publish(partial, lastCompleted.translated || '正在辨識並翻譯…', true);
+    if (partial) {
+      publish(partial, turn.previewTranslation || lastCompleted.translated || '正在辨識並翻譯…', true);
+      queueQuickTranslation(turn, partial);
+    }
     return;
   }
 
@@ -141,7 +265,7 @@ function handleEvent(event) {
     }
     turn.original = original;
     turn.state = 'ready';
-    publish(original, lastCompleted.translated || '正在翻譯…', true);
+    publish(original, turn.previewTranslation || lastCompleted.translated || '正在翻譯…', true);
     translateNext();
     return;
   }
@@ -167,8 +291,6 @@ function handleEvent(event) {
     const turn = turns.get(itemId);
     if (!turn) return;
     turn.translated += event.delta || '';
-    // Show partial Chinese as soon as it exists; this makes video subtitles feel
-    // realtime while still preserving the previous completed line beforehand.
     if (turn.translated.trim()) publish(turn.original, turn.translated.trim(), true);
     return;
   }
@@ -178,7 +300,7 @@ function handleEvent(event) {
     if (!turn) return;
     turn.translated = String(event.text || turn.translated || '').trim();
     if (turn.translated) {
-      lastCompleted = { original: turn.original, translated: turn.translated };
+      rememberContext(turn.original, turn.translated);
       publish(turn.original, turn.translated, false);
     }
     return;
@@ -196,8 +318,9 @@ function handleEvent(event) {
         .trim();
       if (text) turn.translated = text;
       turn.state = 'done';
-      const translated = turn.translated || '（翻譯無法確認）';
-      lastCompleted = { original: turn.original, translated };
+      turn.finalDone = true;
+      const translated = turn.translated || turn.previewTranslation || '（翻譯無法確認）';
+      rememberContext(turn.original, translated);
       publish(turn.original, translated, false);
     }
     if (event.response?.id) responses.delete(event.response.id);
@@ -225,30 +348,33 @@ async function startCapture(options) {
   audioDetected = false;
   transcriptDetected = false;
   lastCompleted = { original: '', translated: '' };
+  contextHistory = [];
+  quickPending = null;
+  quickActive = null;
+  quickSerial = 0;
 
   try {
     if (sourceMode === 'tab') {
-    const captured = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        mandatory: {
-          chromeMediaSource: 'tab',
-          chromeMediaSourceId: options.streamId,
+      const captured = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          mandatory: {
+            chromeMediaSource: 'tab',
+            chromeMediaSourceId: options.streamId,
+          },
         },
-      },
-      video: false,
-    });
-    if (closed || run !== generation) { captured.getTracks().forEach(t => t.stop()); return; }
-    stream = captured;
+        video: false,
+      });
+      if (closed || run !== generation) { captured.getTracks().forEach(t => t.stop()); return; }
+      stream = captured;
 
-    if (!stream.getAudioTracks().length) throw new Error('這個分頁沒有可擷取的音訊軌。');
+      if (!stream.getAudioTracks().length) throw new Error('這個分頁沒有可擷取的音訊軌。');
 
-    // tabCapture 會讓該分頁本身靜音；把擷取到的音訊重新接回喇叭。
-    audioContext = new AudioContext();
-    await audioContext.resume().catch(() => {});
-    if (closed || run !== generation) return;
-    const source = audioContext.createMediaStreamSource(stream);
-    source.connect(audioContext.destination);
-    startAudioMonitor(source);
+      audioContext = new AudioContext();
+      await audioContext.resume().catch(() => {});
+      if (closed || run !== generation) return;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(audioContext.destination);
+      startAudioMonitor(source);
     }
 
     pc = new RTCPeerConnection();
@@ -335,6 +461,10 @@ function stopCapture() {
   audioDetected = false;
   transcriptDetected = false;
   lastCompleted = { original: '', translated: '' };
+  contextHistory = [];
+  quickPending = null;
+  quickActive = null;
+  quickSerial = 0;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
