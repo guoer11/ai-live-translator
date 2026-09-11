@@ -7,11 +7,13 @@ import { chooseSource } from '../chrome-extension/youtube.js';
 const track = { events: [{ tStartMs: 0, dDurationMs: 10000, segs: [{ utf8: 'ポケパッドを使います。' }] }] };
 test('automatic source selection prefers usable captions; absent, malformed or failed probes fall back', async () => {
   const tab = { id: 1, url: 'https://www.youtube.com/watch?v=example' };
-  const ok = await chooseSource(tab, 'ja', async options => {
+  const automatic = await chooseSource(tab, 'ja', async options => {
     assert.equal(options.world, 'MAIN'); assert.deepEqual(options.args, ['ja']);
-    return [{ result: { videoId: 'example', payload: track } }];
+    return [{ result: { videoId: 'example', payload: track, kind: 'automatic' } }];
   }, parseCaptions);
-  assert.equal(ok.source, 'caption');
+  assert.equal(automatic.source, 'caption'); assert.equal(automatic.captionKind, 'automatic');
+  const manual = await chooseSource(tab, 'ja', async () => [{ result: { videoId: 'example', payload: track, kind: 'manual' } }], parseCaptions);
+  assert.equal(manual.source, 'caption'); assert.equal(manual.captionKind, 'manual');
   for (const result of [null, { payload: {} }, { videoId: 'example', payload: {events:[]} }])
     assert.equal((await chooseSource(tab, 'ja', async () => [{ result }], parseCaptions)).source, 'tab');
   assert.equal((await chooseSource(tab, 'ja', async () => { throw Error('restricted track'); }, parseCaptions)).source, 'tab');
