@@ -70,3 +70,13 @@ test('real offscreen audio fallback retains tab capture and ASR completion path'
   } finally { vm.runInContext('stopCapture()',h.context); }
   assert.equal(h.stopped(),1);
 });
+test('audio fallback starts quick translation from partial ASR before the turn completes', async () => {
+  const h = host(); h.context.options={tabId:1,source:'tab',language:'ja',streamId:'stream',endpoint:'https://example.com',accessToken:'test'};
+  try {
+    await vm.runInContext('startCapture(options)',h.context);
+    vm.runInContext("handleEvent({type:'conversation.item.input_audio_transcription.delta',item_id:'audio',delta:'これはポケモンカードのテストです。'})",h.context);
+    assert.equal(h.sent.length,1);
+    assert.match(h.sent[0].response.metadata.quick_job,/^quick:/);
+    assert.equal(h.sent[0].response.input[0].content[0].text,'これはポケモンカードのテストです。');
+  } finally { vm.runInContext('stopCapture()',h.context); }
+});
