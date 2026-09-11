@@ -14,7 +14,7 @@ if (manifest.scope !== './' || manifest.start_url !== './') throw new Error('PWA
 const extensionDir = path.join(root, 'chrome-extension');
 const extensionManifest = JSON.parse(readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'));
 if (extensionManifest.manifest_version !== 3) throw new Error('Chrome extension must use Manifest V3');
-for (const file of ['popup.html', 'popup.css', 'popup.js', 'service-worker.js', 'offscreen.html', 'offscreen.js', 'overlay.js', 'config.js']) {
+for (const file of ['popup.html', 'popup.css', 'popup.js', 'service-worker.js', 'offscreen.html', 'offscreen.js', 'overlay.js', 'config.js', 'captions.js', 'youtube.js', 'caption-source.js']) {
   if (!existsSync(path.join(extensionDir, file))) throw new Error(`Missing extension asset ${file}`);
 }
 if (!extensionManifest.permissions?.includes('tabCapture') || !extensionManifest.permissions?.includes('offscreen')) throw new Error('Chrome extension capture permissions missing');

@@ -24,6 +24,11 @@ jobs:
         env:
           TRANSLATOR_SESSION_ENDPOINT: ${{ vars.TRANSLATOR_SESSION_ENDPOINT }}
       - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-live-translator-chrome
+          path: chrome-extension/
+          if-no-files-found: error
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

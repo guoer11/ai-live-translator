@@ -2,7 +2,20 @@
 export function parseCaptions(payload) {
   if (!Array.isArray(payload?.events) || payload.events.length > 50000) return [];
   const cues = [];
-  for (const [index, event] of payload.events.entries()) {
+  const events = [], windows = new Map();
+  for (const event of payload.events) {
+    if (!Array.isArray(event.segs) || !Number.isFinite(event.tStartMs)) continue;
+    const previous = windows.get(event.wWinId ?? 0);
+    if (event.aAppend && previous && event.tStartMs >= previous.tStartMs && event.tStartMs - previous.tStartMs < 30000) {
+      const offset = event.tStartMs - previous.tStartMs;
+      previous.segs.push(...event.segs.map(seg => ({ ...seg, tOffsetMs: offset + (Number(seg.tOffsetMs) || 0) })));
+      previous.dDurationMs = Math.max(previous.dDurationMs || 3000, offset + (Number(event.dDurationMs) || 3000));
+    } else {
+      const copy = { ...event, segs: [...event.segs] };
+      events.push(copy); windows.set(event.wWinId ?? 0, copy);
+    }
+  }
+  for (const [index, event] of events.entries()) {
     if (!Array.isArray(event.segs) || !Number.isFinite(event.tStartMs)) continue;
     const start = event.tStartMs / 1000;
     const end = start + Math.max(0.1, Math.min(Number(event.dDurationMs) || 3000, 30000) / 1000);
@@ -108,7 +121,8 @@ export class CaptionTranslator {
       const text = (event.response.output || []).flatMap(o => o.content || []).filter(c => c.type === 'output_text').map(c => c.text || '').join('');
       if (text) job.translation = text;
     }
-    if (item && job.revision >= (item.displayRevision || 0) && job.order >= this.visible && job.translation.trim()
+    const failed = event.type === 'response.done' && event.response.status && event.response.status !== 'completed';
+    if (!failed && item && job.revision >= (item.displayRevision || 0) && job.order >= this.visible && job.translation.trim()
       && ['response.output_text.delta', 'response.output_text.done', 'response.done'].includes(event.type)) {
       this.visible = job.order; item.translation = job.translation.trim(); item.displayRevision = job.revision; this.previous = item.translation;
       this.publish(job.text, item.translation, event.type !== 'response.done' || !item.final || item.revision !== job.revision);

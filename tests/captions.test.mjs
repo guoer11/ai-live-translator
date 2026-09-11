@@ -1,6 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCaptions, CaptionClock, CaptionTranslator } from '../chrome-extension/captions.js';
+test('rolling JSON3 append updates the same cue at its timed offset', () => {
+  const payload = {events:[
+    {tStartMs:1000,dDurationMs:1000,wWinId:1,segs:[{utf8:'ポケパッドを使って'}]},
+    {tStartMs:1500,dDurationMs:2000,wWinId:1,aAppend:1,segs:[{utf8:'山札を見ます。'}]},
+  ]};
+  const original = JSON.stringify(payload), sent = [];
+  const clock = new CaptionClock(parseCaptions(payload), c => sent.push(c), () => {});
+  clock.tick(1); clock.tick(1.5); clock.tick(2);
+  assert.equal(sent.length,2); assert.equal(sent[0].id,sent[1].id);
+  assert.equal(sent[0].final,false); assert.equal(sent[1].final,true);
+  assert.equal(sent[1].text,'ポケパッドを使って山札を見ます。');
+  assert.equal(JSON.stringify(payload),original);
+});
+test('out-of-order completions and cancelled seek responses never overwrite newer Chinese', () => {
+  const sent=[], shown=[]; const t=new CaptionTranslator({send:e=>sent.push(e),publish:(...v)=>shown.push(v)});
+  t.update({id:'a',text:'先の文',final:true}); t.update({id:'b',text:'次の文',final:true});
+  for (let i=0;i<2;i++) t.handle({type:'response.created',response:{id:`r${i}`,metadata:sent[i].response.metadata}});
+  t.handle({type:'response.output_text.delta',response_id:'r1',delta:'下一句'});
+  t.handle({type:'response.done',response:{id:'r0',status:'completed',output:[{content:[{type:'output_text',text:'舊句'}]}]}});
+  assert.equal(shown.at(-1)[1],'下一句');
+  t.reset(); const count=shown.length;
+  t.handle({type:'response.output_text.delta',response_id:'r1',delta:'過期'});
+  assert.equal(shown.length,count); assert.equal(sent.at(-1).type,'response.cancel');
+});
 test('caption clock sends available phrases before cue end and finalizes same ID without repeats', () => {
   const cues = parseCaptions({ events: [{ tStartMs: 1000, dDurationMs: 6000, segs: [{ utf8: 'ポケパッドを使って', tOffsetMs: 0 }, { utf8: '山札を見ます。', tOffsetMs: 500 }] }] });
   const sent = []; const clock = new CaptionClock(cues, c => sent.push(c), () => {});

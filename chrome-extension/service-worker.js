@@ -261,13 +261,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'OFFSCREEN_SUBTITLE') {
     if (sender.url !== chrome.runtime.getURL(OFFSCREEN_URL)) return false;
     const { tabId, original, translated, pending } = message;
-    sendToTab(tabId, { type: 'AI_TRANSLATOR_SUBTITLE', original, translated, pending });
+    getState().then(state => {
+      if (state.running && state.tabId === tabId && state.sessionId === message.sessionId)
+        return sendToTab(tabId, { type: 'AI_TRANSLATOR_SUBTITLE', original, translated, pending });
+    });
     return false;
   }
   if (message?.type === 'OFFSCREEN_ERROR') {
     if (sender.url !== chrome.runtime.getURL(OFFSCREEN_URL)) return false;
     (async () => {
       const state = await getState();
+      if (!state.running || state.sessionId !== message.sessionId) return;
       if (state.tabId) await sendToTab(state.tabId, { type: 'AI_TRANSLATOR_ERROR', message: message.error });
       await stopTranslation(message.error || '翻譯連線已中斷。');
     })();

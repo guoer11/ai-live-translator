@@ -26,13 +26,14 @@ function sendRuntime(message) {
 
 function publish(original = '', translated = '', pending = false) {
   if (!activeTabId) return;
-  sendRuntime({ type: 'OFFSCREEN_SUBTITLE', tabId: activeTabId, original, translated, pending });
+  sendRuntime({ type: 'OFFSCREEN_SUBTITLE', sessionId, tabId: activeTabId, original, translated, pending });
 }
 
 function fail(message) {
   if (closed) return;
+  const failedSession = sessionId;
   stopCapture();
-  sendRuntime({ type: 'OFFSCREEN_ERROR', error: message || '翻譯連線已中斷。' });
+  sendRuntime({ type: 'OFFSCREEN_ERROR', sessionId: failedSession, error: message || '翻譯連線已中斷。' });
 }
 
 function send(event) {
@@ -255,12 +256,13 @@ async function startCapture(options) {
     else pc.addTransceiver('audio', { direction: 'recvonly' });
     dc = pc.createDataChannel('oai-events');
     dc.onmessage = message => {
+      if (run !== generation) return;
       try { handleEvent(JSON.parse(message.data)); }
       catch { fail('字幕資料格式異常，請重新開始。'); }
     };
-    dc.onclose = () => { if (!closed) fail('翻譯連線已關閉，請重新開始。'); };
+    dc.onclose = () => { if (!closed && run === generation) fail('翻譯連線已關閉，請重新開始。'); };
     pc.onconnectionstatechange = () => {
-      if (pc?.connectionState === 'failed') fail('網路連線失敗，請停止後重試。');
+      if (run === generation && pc?.connectionState === 'failed') fail('網路連線失敗，請停止後重試。');
     };
 
     const ready = new Promise((resolve, reject) => {
