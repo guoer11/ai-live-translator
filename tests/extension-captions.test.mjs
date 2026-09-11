@@ -5,19 +5,28 @@ import { readFileSync } from 'node:fs';
 import { CaptionClock, CaptionTranslator, parseCaptions } from '../chrome-extension/captions.js';
 import { chooseSource } from '../chrome-extension/youtube.js';
 const track = { events: [{ tStartMs: 0, dDurationMs: 10000, segs: [{ utf8: 'ポケパッドを使います。' }] }] };
-test('automatic source selection prefers usable captions; absent, malformed or failed probes fall back', async () => {
+test('automatic source selection prefers usable captions; rendered-caption fallback stays in caption mode', async () => {
   const tab = { id: 1, url: 'https://www.youtube.com/watch?v=example' };
   const automatic = await chooseSource(tab, 'ja', async options => {
     assert.equal(options.world, 'MAIN'); assert.deepEqual(options.args, ['ja']);
-    return [{ result: { videoId: 'example', payload: track, kind: 'automatic' } }];
+    return [{ result: { videoId: 'example', payload: track, kind: 'automatic', languageCode: 'ja' } }];
   }, parseCaptions);
-  assert.equal(automatic.source, 'caption'); assert.equal(automatic.captionKind, 'automatic');
-  const manual = await chooseSource(tab, 'ja', async () => [{ result: { videoId: 'example', payload: track, kind: 'manual' } }], parseCaptions);
+  assert.equal(automatic.source, 'caption'); assert.equal(automatic.captionKind, 'automatic'); assert.equal(automatic.liveCaptions, false);
+  const manual = await chooseSource(tab, 'ja', async () => [{ result: { videoId: 'example', payload: track, kind: 'manual', languageCode: 'ja' } }], parseCaptions);
   assert.equal(manual.source, 'caption'); assert.equal(manual.captionKind, 'manual');
+  const live = await chooseSource(tab, 'ja', async () => [{ result: { videoId: 'example', live: true, kind: 'automatic', languageCode: 'ja' } }], parseCaptions);
+  assert.equal(live.source, 'caption'); assert.equal(live.captionKind, 'automatic'); assert.equal(live.liveCaptions, true); assert.deepEqual(live.cues, []);
   for (const result of [null, { payload: {} }, { videoId: 'example', payload: {events:[]} }])
     assert.equal((await chooseSource(tab, 'ja', async () => [{ result }], parseCaptions)).source, 'tab');
   assert.equal((await chooseSource(tab, 'ja', async () => { throw Error('restricted track'); }, parseCaptions)).source, 'tab');
   assert.equal((await chooseSource({id:1,url:'https://example.com'}, 'ja', assert.fail, parseCaptions)).source, 'tab');
+});
+
+test('caption clock accepts rendered live cue envelope', () => {
+  const emitted = [];
+  const clock = new CaptionClock([], cue => emitted.push(cue), () => {});
+  clock.tick({ liveCue: { id: 'live:1', text: '国内だけ勝っていて', final: false, at: 12.3 } });
+  assert.deepEqual(emitted, [{ id: 'live:1', text: '国内だけ勝っていて', final: false, at: 12.3 }]);
 });
 
 function host() {
@@ -58,6 +67,16 @@ test('real offscreen caption branch never captures audio or translates ASR event
     assert.equal(h.sent.length,1); assert.equal(h.sent[0].response.input[0].content[0].text,'ポケパッドを使います。');
     h.listeners[0]({target:'offscreen',type:'CAPTION_TICK',sessionId:'s',time:1.1,paused:false},{id:'test'},()=>{});
     assert.equal(h.sent.length,1);
+  } finally { vm.runInContext('stopCapture()',h.context); }
+});
+test('real offscreen live caption envelope translates without tab audio capture', async () => {
+  const h = host();
+  h.context.options = { tabId: 1, language: 'ja', source: 'caption', sessionId: 's', endpoint: 'https://example.com', accessToken: 'test', cues: [] };
+  try {
+    await vm.runInContext('startCapture(options)',h.context);
+    h.listeners[0]({target:'offscreen',type:'CAPTION_TICK',sessionId:'s',time:{liveCue:{id:'live:1',text:'国内だけ勝っていて',final:false,at:1}},paused:false},{id:'test'},()=>{});
+    assert.equal(h.captures(),0); assert.equal(h.sent.length,1);
+    assert.equal(h.sent[0].response.input[0].content[0].text,'国内だけ勝っていて');
   } finally { vm.runInContext('stopCapture()',h.context); }
 });
 test('real offscreen audio fallback retains tab capture and ASR completion path', async () => {
