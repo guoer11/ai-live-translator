@@ -20,7 +20,7 @@ async function setState(patch) {
 
 async function clearState(message = '') {
   const next = { running: false, tabId: null, language: null, size: null, source: null, captionKind: null,
-    liveCaptions: false, sessionId: null, message };
+    liveCaptions: false, captionDisplay: null, sessionId: null, message };
   await chrome.storage.session.set({ [STATE_KEY]: next });
   return next;
 }
@@ -144,10 +144,11 @@ function sourceMessage(selected) {
   return selected.captionKind === 'automatic' ? '自動字幕 → AI 翻譯' : '官方字幕 → AI 翻譯';
 }
 
-async function startTranslation(language = 'en', size = 'medium', targetTabId = null, forceAudio = false) {
+async function startTranslation(language = 'en', size = 'medium', targetTabId = null, forceAudio = false, captionDisplay = 'translated') {
   const current = await getState();
   if (current.running) return current;
   if (starting) throw new Error('正在連線，請稍候。');
+  captionDisplay = captionDisplay === 'bilingual' ? 'bilingual' : 'translated';
   starting = true;
   const run = ++operation;
   let tab;
@@ -166,7 +167,7 @@ async function startTranslation(language = 'en', size = 'medium', targetTabId = 
 
     await injectOverlay(tab.id);
     await sendToTab(tab.id, {
-      type: 'AI_TRANSLATOR_SHOW', language, size, source: selected.source,
+      type: 'AI_TRANSLATOR_SHOW', language, size, source: selected.source, captionDisplay,
       captionKind: selected.source === 'caption' ? selected.captionKind : null,
     });
     await ensureOffscreen();
@@ -197,6 +198,7 @@ async function startTranslation(language = 'en', size = 'medium', targetTabId = 
     const state = await setState({ running: true, tabId: tab.id, language, size, source: selected.source,
       captionKind: selected.source === 'caption' ? selected.captionKind : null,
       liveCaptions: selected.source === 'caption' && !!selected.liveCaptions,
+      captionDisplay,
       sessionId, message: sourceMessage(selected) });
     if (selected.source === 'caption') {
       const ack = await chrome.tabs.sendMessage(tab.id, {
@@ -251,7 +253,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           paused: false, seeking: false });
       } else {
         await stopTranslation('影片已變更，重新判斷字幕來源…');
-        await startTranslation(state.language, state.size, state.tabId, message.type === 'CAPTION_UNAVAILABLE');
+        await startTranslation(state.language, state.size, state.tabId, message.type === 'CAPTION_UNAVAILABLE', state.captionDisplay || 'translated');
       }
     })().catch(error => stopTranslation(error.message));
     return false;
@@ -289,7 +291,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return sendResponse({ ok: true, state: await publicState('已登出。') });
       }
       if (message?.type === 'START_TRANSLATION') {
-        const state = await startTranslation(message.language, message.size);
+        const state = await startTranslation(message.language, message.size, null, false, message.captionDisplay);
         return sendResponse({ ok: true, state: { ...state, email: (await getAuth())?.email || null } });
       }
       if (message?.type === 'STOP_TRANSLATION') {
