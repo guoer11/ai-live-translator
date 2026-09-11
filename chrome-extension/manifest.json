@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AI 即時翻譯－網頁字幕",
   "short_name": "AI 翻譯字幕",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "YouTube 字幕優先、分頁音訊備援，使用家庭 AI 翻譯服務顯示繁體中文字幕。",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAziZ0uE1Aar0LXSibGYHDqoGJ8G0v3OVA6hOiSewLxw5rtC/AjGmmbCvPZdifYP3EDz1kd/zpihBb5Po5EQVv1B1xhhTcBqQ7rKpi8hqL+hLloIorN73GcHmMpjpDyj1bDagk1Z7+HsrPCYhzN12vubJXUbtIBiVksY+1HcSacBQpbXaQkXdqIomEuQwvGS8Uvpmq71tdGZ3h3mI/b1MXNGtBhdYhmTqnuylKsFORRsy+thV2XGFJkGqFj3Hqj/4ejtpdLkwvzcT8NctPlU4x0SmyBpeumPLv50Z1S6NYi3N6PxVufQxeO2W5wa1GebMUMQ6eNIJ8vKxfOFX9S/a9QwIDAQAB",
