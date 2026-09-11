@@ -3,6 +3,15 @@ import { History } from './history.js';
 import { RealtimeTranslator } from './realtime.js';
 import { auth, authorize, signIn } from './auth.js';
 const $ = id => document.getElementById(id);
+const billing = document.createElement('p');
+billing.className = 'settings-note';
+const billingLink = document.createElement('a');
+billingLink.href = 'https://platform.openai.com/settings/organization/billing/overview';
+billingLink.target = '_blank';
+billingLink.rel = 'noopener noreferrer';
+billingLink.textContent = '查看 OpenAI 餘額／儲值 ↗';
+billing.append(billingLink, document.createElement('br'), '餘額以 OpenAI 帳務頁面為準，需登入付款帳號查看。');
+$('account-email').after(billing);
 let storage; try { storage = sessionStorage; } catch { /* Private browser restrictions. */ }
 let prefs = {}; try { prefs = JSON.parse(localStorage.getItem('translator.preferences') || '{}'); } catch {}
 if (!prefs || typeof prefs !== 'object') prefs = {};
