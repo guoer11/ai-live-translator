@@ -1,6 +1,6 @@
-const CACHE = 'ai-translator-v0.2.5';
+const CACHE = 'ai-translator-v0.3.0';
 const ROOT = new URL('./', self.location.href);
-const ASSETS = ['./', './index.html', './style.css', './config.js', './src/app.js', './src/auth.js', './vendor/supabase/supabase.js', './src/history.js', './src/realtime.js', './src/language.js', './vendor/opencc/cn2t.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
+const ASSETS = ['./', './index.html', './style.css', './config.js', './src/app.js', './src/auth.js', './src/face.js', './vendor/supabase/supabase.js', './src/history.js', './src/realtime.js', './src/language.js', './vendor/opencc/cn2t.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 
 async function precache() {
   const cache = await caches.open(CACHE);
